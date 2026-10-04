@@ -43,6 +43,7 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
     private var hudView: GeelyHudGuidanceView? = null
     private var attachedDisplayId = Display.INVALID_DISPLAY
     private var guidance: CarPlayHudGuidance? = null
+    @Volatile private var windowStatus = "not_attached"
     private val expireGuidance = Runnable {
         guidance = null
         detachWindow()
@@ -110,6 +111,13 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
             .sortedBy(GeelyHudDisplay::id)
             .toList()
 
+    internal fun selectedIndex(displays: List<GeelyHudDisplay>, id: Int, name: String?): Int {
+        val exact = displays.indexOfFirst { it.id == id }
+        if (exact >= 0) return exact
+        val matches = displays.indices.filter { displays[it].name == name }
+        return matches.singleOrNull() ?: -1
+    }
+
     fun selectDisplay(context: Context, display: GeelyHudDisplay?) {
         AirPlayPersistence.saveGeelyHudDisplay(
             context,
@@ -127,7 +135,7 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
             append("enabled=${AirPlayPersistence.loadGeelyHudEnabled(context)} ")
             append("overlayPermission=${Settings.canDrawOverlays(context)} ")
             append("selectedId=$selectedId selectedName=${selectedName.ifBlank { "automatic" }} ")
-            append("attachedId=$attachedDisplayId")
+            append("attachedId=$attachedDisplayId guidancePresent=${guidance != null} windowStatus=$windowStatus")
             appendLine()
             append("availableDisplays=")
             if (displays.isEmpty()) append("none") else append(
@@ -143,6 +151,7 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
     private fun refresh() {
         val activity = activityRef?.get()
         if (activity == null || activity.isFinishing || activity.isDestroyed) {
+            windowStatus = "host_unavailable"
             detachWindow()
             return
         }
@@ -150,6 +159,11 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
             guidance == null ||
             !Settings.canDrawOverlays(activity)
         ) {
+            windowStatus = when {
+                !AirPlayPersistence.loadGeelyHudEnabled(activity) -> "disabled"
+                !Settings.canDrawOverlays(activity) -> "overlay_permission_missing"
+                else -> "no_guidance"
+            }
             detachWindow()
             return
         }
@@ -160,12 +174,13 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
         val savedName = AirPlayPersistence.loadGeelyHudDisplayName(activity)
         val display = if (savedId != Display.INVALID_DISPLAY || savedName != null) {
             displays.firstOrNull { it.displayId == savedId }
-                ?: displays.firstOrNull { it.name == savedName }
+                ?: displays.filter { it.name == savedName }.singleOrNull()
         } else {
             displays.firstOrNull { it.name.contains("hud", ignoreCase = true) }
                 ?: displays.singleOrNull()
         }
         if (display == null) {
+            windowStatus = "no_unique_target"
             detachWindow()
             return
         }
@@ -193,7 +208,9 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
                 windowManager = manager
                 hudView = view
                 attachedDisplayId = display.displayId
+                windowStatus = "window_added"
             } catch (error: RuntimeException) {
+                windowStatus = "failed_${error.javaClass.simpleName}"
                 Log.w(TAG, "Could not open the HUD display", error)
                 runCatching { manager.removeViewImmediate(view) }
                 return

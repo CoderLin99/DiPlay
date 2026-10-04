@@ -537,11 +537,11 @@
     <string name="return_home_icon">أيقونة العودة إلى شاشة السيارة</string>
     <string name="return_home_icon_description">اختر صورة مربعة لزر CarPlay الذي يعيدك إلى شاشة السيارة. ستظهر الأيقونة الجديدة عند الاتصال التالي.</string>
     <string name="describe_the_problem">صِف المشكلة ووقت حدوثها والنتيجة المتوقعة</string>
-    <string name="upload_report_to_cloud">Prepare GitHub bug report</string>
+    <string name="upload_report_to_cloud">Generate offline feedback</string>
     <string name="uploading_to_cloud">Preparing report…</string>
     <string name="describe_problem_before_uploading">صِف المشكلة قبل الرفع.</string>
     <string name="problem_description_too_long">يجب ألا يتجاوز الوصف 2000 حرف.</string>
-    <string name="report_upload_privacy">Saves a redacted report locally. Open CoderLin99/DiPlay on GitHub, review the draft, attach the report and submit. Issues are public; nothing uploads automatically.</string>
+    <string name="report_upload_privacy">The report is saved locally. Share the TXT with your support chat, or copy it to a phone or USB drive. No network or GitHub login is required. GitHub is optional.</string>
     <string name="report_uploaded">تم رفع التقرير</string>
     <string name="report_uploaded_message">استلمت السحابة وصف المشكلة وتقرير التشخيص.</string>
     <string name="report_upload_failed">Could not prepare the report</string>
@@ -551,8 +551,8 @@
     <string name="diagnostic_report_saved_in_app">تم حفظ التقرير بشكل خاص داخل DiPlay لعدم توفر موقع حفظ عام. يمكنك مشاركته أو عرضه هنا. لا يتم إرسال شيء تلقائياً.</string>
     <string name="view_diagnostic_report">عرض التقرير</string>
     <string name="diagnostic_report_copy_hint">المس نص التقرير مطولاً لتحديده ونسخه. يمكنك استخدام ذلك إذا لم يتوفر تطبيق للمشاركة.</string>
-    <string name="github_report_ready">Report ready — not submitted</string>
-    <string name="github_report_instructions">Report: %1$s\nOpen GitHub and sign in, review the prefilled summary, attach the full report and submit. You can share the report and issue link to your phone first. The app cannot confirm submission.</string>
-    <string name="github_open_issue">Open GitHub issue</string>
+    <string name="github_report_ready">Offline report saved</string>
+    <string name="github_report_instructions">Report: %1$s\nShare the full TXT file with your support chat, or copy it using the file manager. No car network or GitHub login is needed. You can optionally submit it to GitHub from a phone or computer.</string>
+    <string name="github_open_issue">GitHub (optional)</string>
     <string name="github_fork_source">Open CoderLin99 fork</string>
 </resources>

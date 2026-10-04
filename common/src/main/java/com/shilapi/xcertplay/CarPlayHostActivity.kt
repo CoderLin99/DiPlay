@@ -2994,6 +2994,7 @@ class CarPlayHostActivity : ComponentActivity() {
             cluster = clusterDisplayConfig(),
             rightHandDrive = rightHandDrive,
             hevc = hevcEnabled,
+            disableAudioOutput = AirPlayPersistence.loadBluetoothAudioOutput(this),
             opusOutputSupported = supportsOpusOutput(),
             microphone = microphoneAvailable,
             manufacturer = normalizedManufacturer(),
@@ -3217,6 +3218,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     }
                     activeAirPlaySession = session
                     CarPlayBackgroundSession.active = true
+                    CarPlayMediaKeys.onSessionConnected(controller)
                     reconnectAttempts = 0
                     logThemeState(ThemeModeDiagnostics.Source.SESSION_ACTIVE, resources.configuration)
                     syncAirPlayDarkMode(ThemeModeDiagnostics.Source.SESSION_ACTIVE)
@@ -3229,6 +3231,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 runOnUiThread {
                     if (activeAirPlaySession === session) activeAirPlaySession = null
                     CarPlayBackgroundSession.active = false
+                    CarPlayMediaKeys.onSessionDisconnected(controller)
                     if (menuOpen || controllerGeneration != restartGeneration) {
                         return@runOnUiThread
                     }
@@ -3402,6 +3405,7 @@ class CarPlayHostActivity : ComponentActivity() {
             pairings = pairings,
             listener = createSessionListener(controllerGeneration),
             media = media,
+            factoryBluetoothHandoffEnabled = AirPlayPersistence.loadGeelyBluetoothHandoff(this),
             reportStatus = createStatusReporter(controllerGeneration),
             loadPairRecord = { AirPlayPersistence.loadLockdownRecord(this) },
             savePairRecord = { record -> AirPlayPersistence.saveLockdownRecord(this, record) },
@@ -3416,6 +3420,7 @@ class CarPlayHostActivity : ComponentActivity() {
         controller = next
         next.setHudNavigationListener(GeelyHudProjection::update)
         CarPlayMediaKeys.attach(this, next,
+            forwardMedia = !airPlayConfig.disableAudioOutput,
             manageAudioFocus = geelyFactory == null && !AirPlayPersistence.loadAudioFocusEnabled(this),
             onMediaPlaying = renderer::onMediaPlaying)
         if (airPlayConfig.videoInCar) CarPlayVideo.attach(this, next)

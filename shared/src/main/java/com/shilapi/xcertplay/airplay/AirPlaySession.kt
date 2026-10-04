@@ -422,8 +422,7 @@ class AirPlaySession(
                     }
                     debugLog("airplay /info request=$requestInfo")
                 }
-                Log.i(
-                    TAG,
+                debugLog(
                     "airplay /info features=${info["features"]} " +
                         "audioFormats=${(info["audioFormats"] as? List<*>)?.size ?: 0} " +
                         "audioLatencies=${(info["audioLatencies"] as? List<*>)?.size ?: 0}",

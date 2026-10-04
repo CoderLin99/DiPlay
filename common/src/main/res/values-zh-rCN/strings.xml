@@ -606,11 +606,11 @@
     <string name="return_home_icon">CarPlay 返回桌面图标</string>
     <string name="return_home_icon_description">选择一张正方形图片，作为 CarPlay 返回车机桌面的按钮图标。下次连接时生效。</string>
     <string name="describe_the_problem">请填写故障现象、发生时间和预期结果</string>
-    <string name="upload_report_to_cloud">生成 GitHub 故障反馈</string>
+    <string name="upload_report_to_cloud">生成离线故障反馈</string>
     <string name="uploading_to_cloud">正在生成报告…</string>
     <string name="describe_problem_before_uploading">请先填写故障描述。</string>
     <string name="problem_description_too_long">故障描述不能超过 2000 个字符。</string>
-    <string name="report_upload_privacy">脱敏报告先保存在本机。打开 CoderLin99/DiPlay 的 GitHub Issue，检查内容、添加日志附件后提交。Issue 公开，不会自动上传。</string>
+    <string name="report_upload_privacy">报告保存在本机，可把 TXT 发到当前聊天，或复制到手机、U 盘。无需联网或登录 GitHub；GitHub 反馈仅作为可选入口。</string>
     <string name="report_uploaded">报告已上传</string>
     <string name="report_uploaded_message">云端已收到故障描述和诊断报告。</string>
     <string name="report_upload_failed">报告生成失败</string>
@@ -620,8 +620,8 @@
     <string name="diagnostic_report_saved_in_app">由于公共保存位置不可用，报告已私密保存到 DiPlay。您可以在此分享或查看报告。不会自动发送任何内容。</string>
     <string name="view_diagnostic_report">查看报告</string>
     <string name="diagnostic_report_copy_hint">长按报告文本即可选择并复制。如果没有可用的分享应用，可以使用此方式。</string>
-    <string name="github_report_ready">报告已生成，尚未提交</string>
-    <string name="github_report_instructions">报告：%1$s\n打开 GitHub 登录，检查预填摘要，添加完整日志附件后提交。也可以先把文件和反馈链接分享到手机再提交。应用无法确认提交结果。</string>
-    <string name="github_open_issue">打开 GitHub 反馈</string>
+    <string name="github_report_ready">离线报告已保存</string>
+    <string name="github_report_instructions">报告：%1$s\n将完整 TXT 文件发到当前聊天，或用文件管理器复制到手机、U 盘。无需车机联网或登录 GitHub。也可在手机或电脑上选择提交到 GitHub。</string>
+    <string name="github_open_issue">GitHub（可选）</string>
     <string name="github_fork_source">查看 CoderLin99 修改版源码</string>
 </resources>

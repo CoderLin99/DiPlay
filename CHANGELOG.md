@@ -1,5 +1,14 @@
 # Unreleased
 
+## CoderLin99 0.2.11-geely.2 (vehicle verification build)
+
+- Preserve Bluetooth music by default. Factory A2DP handoff is opt-in, requires a phone request and runs at most once per session; it never overrides a later manual reconnection.
+- Add explicit original-Bluetooth audio mode, retaining CarPlay video while leaving media controls with the original audio source. Reconnect after changing modes.
+- Establish a media session when CarPlay connects, before its first music packet, without taking audio focus early. Normalize standard OneOS key aliases, suppress repeated presses and retain raw key / forwarding diagnostics. OEM key consumption still requires vehicle verification.
+- Add a five-second secondary-display marker and correct selection of displays sharing the same name. Full Geely instrument maps remain unimplemented pending display-region and permission verification.
+- Make offline TXT feedback and sharing the primary report path; GitHub is optional. Add audio negotiation, mode ownership and head-unit recording-route diagnostics. The reported WeChat silence while connected to factory Bluetooth remains under investigation; the app cannot observe WeChat's iPhone recording route.
+- Use versionCode 31 and the existing CoderLin99 signing key for an in-place upgrade from geely.1.
+
 - Save diagnostic reports privately in DiPlay when the head unit has no document picker or working Downloads provider, with explicit Share and selectable View report actions. This unblocks collecting logs for #135; its CarPlay startup failure still needs a device report.
 - Restore wireless CarPlay sound on KX11 head units while keeping the proven wired audio path.
 - Recognize the hotspot interface used by Android 9 KX11 head units so wireless CarPlay can leave the preparation screen.

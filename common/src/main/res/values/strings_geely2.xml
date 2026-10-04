@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="geely_audio_output">Audio output</string>
+    <string name="geely_audio_carplay">CarPlay audio</string>
+    <string name="geely_audio_bluetooth">Original Bluetooth audio (compatibility)</string>
+    <string name="geely_audio_hint">Reconnect after changing. Bluetooth mode keeps projection but sends no CarPlay audio; choose the car Bluetooth output on the iPhone. Media keys stay with the original audio source.</string>
+    <string name="geely_handoff">Factory Bluetooth handoff (experimental)</string>
+    <string name="geely_handoff_hint">Off by default. When enabled, an iPhone handoff request may disconnect Bluetooth music once per session. Use only to test a confirmed route conflict; Bluetooth compatibility mode always preserves the connection.</string>
+    <string name="geely_reconnect_required">Reconnect CarPlay to apply this change.</string>
+    <string name="geely_probe">Identify a display (5 seconds)</string>
+    <string name="geely_probe_title">Park first, then select a display</string>
+    <string name="geely_probe_started">Marker window added. Check where the ID appears; it disappears in 5 seconds.</string>
+    <string name="geely_probe_failed">Marker unavailable. Export diagnostics for the reason.</string>
+    <string name="geely_probe_stop">Remove display marker now</string>
+    <string name="geely_probe_hint">While parked, identify one display at a time. A small cyan ID appears near its top-right corner for 5 seconds. This does not enable a map or change your selected HUD display.</string>
+</resources>

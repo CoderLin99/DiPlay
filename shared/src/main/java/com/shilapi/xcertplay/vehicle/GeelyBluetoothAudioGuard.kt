@@ -5,16 +5,12 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.SystemClock
 import java.io.Closeable
 
-/** Factory-style A2DP-sink handoff for one active CarPlay peer. Does not alter bonding or HFP. */
+/** Opt-in, one-shot A2DP-sink handoff. Preserves any later user-initiated reconnection. */
 @SuppressLint("MissingPermission")
 internal class GeelyBluetoothAudioGuard(
     context: Context,
@@ -24,19 +20,8 @@ internal class GeelyBluetoothAudioGuard(
     private val app = context.applicationContext
     private val adapter = app.getSystemService(BluetoothManager::class.java)?.adapter
     private var proxy: BluetoothProfile? = null
-    private var registered = false
     private var closed = false
-    private var lastDisconnectAt = 0L
-    private var unavailable = false
-    private val receiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != ACTION_CONNECTION) return
-            @Suppress("DEPRECATION")
-            val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
-            if (!device.address.equals(address, true)) return
-            if (intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1) in 1..2) disconnectPeer()
-        }
-    }
+    private var attempted = false
 
     fun start() {
         if (Build.VERSION.SDK_INT >= 31 && app.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
@@ -44,13 +29,6 @@ internal class GeelyBluetoothAudioGuard(
             return
         }
         try {
-            val filter = IntentFilter(ACTION_CONNECTION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                app.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
-            } else {
-                app.registerReceiver(receiver, filter)
-            }
-            registered = true
             val requested = adapter?.getProfileProxy(app, object : BluetoothProfile.ServiceListener {
                 override fun onServiceConnected(profile: Int, connected: BluetoothProfile) = synchronized(this@GeelyBluetoothAudioGuard) {
                     if (closed) { adapter?.closeProfileProxy(profile, connected); return@synchronized }
@@ -68,18 +46,18 @@ internal class GeelyBluetoothAudioGuard(
 
     @Synchronized
     private fun disconnectPeer() {
-        if (closed || unavailable) return
+        if (closed || attempted) return
         val profile = proxy ?: return
+        attempted = true
         try {
-            val device = profile.connectedDevices.firstOrNull { it.address.equals(address, true) } ?: return
-            val now = SystemClock.elapsedRealtime()
-            if (lastDisconnectAt != 0L && now - lastDisconnectAt < 500L) return
-            lastDisconnectAt = now
+            val device = profile.connectedDevices.firstOrNull { it.address.equals(address, true) }
+            if (device == null) { report("Factory Bluetooth one-shot handoff: peer not connected"); return }
             val disconnected = profile.javaClass.getMethod("disconnect", BluetoothDevice::class.java).invoke(profile, device)
-            report("Factory Bluetooth music handoff accepted=${disconnected == true}")
+            report("Factory Bluetooth one-shot handoff accepted=${disconnected == true}")
         } catch (error: Exception) {
-            unavailable = true
             report("Factory Bluetooth music handoff unavailable: ${error.javaClass.simpleName}")
+        } finally {
+            close()
         }
     }
 
@@ -87,14 +65,11 @@ internal class GeelyBluetoothAudioGuard(
     override fun close() {
         if (closed) return
         closed = true
-        if (registered) runCatching { app.unregisterReceiver(receiver) }
-        registered = false
         proxy?.let { runCatching { adapter?.closeProfileProxy(A2DP_SINK, it) } }
         proxy = null
     }
 
     companion object {
         private const val A2DP_SINK = 11
-        private const val ACTION_CONNECTION = "android.bluetooth.a2dp-sink.profile.action.CONNECTION_STATE_CHANGED"
     }
 }

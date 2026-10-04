@@ -505,6 +505,23 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CLUSTER_MAP, enabled).apply()
     }
 
+    /** Off by default: a connected video session does not prove that CarPlay audio works. */
+    fun loadGeelyBluetoothHandoff(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("geely_bluetooth_handoff", false)
+
+    fun saveGeelyBluetoothHandoff(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("geely_bluetooth_handoff", enabled).apply()
+    }
+
+    fun loadBluetoothAudioOutput(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("bluetooth_audio_output", false)
+
+    fun saveBluetoothAudioOutput(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("bluetooth_audio_output", enabled).apply()
+    }
+
     fun loadGeelyHudEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_GEELY_HUD_ENABLED, false)
 

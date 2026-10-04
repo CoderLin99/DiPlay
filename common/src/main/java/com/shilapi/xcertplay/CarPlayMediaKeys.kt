@@ -51,6 +51,8 @@ internal object CarPlayMediaKeys {
     private var focusRequest: AudioFocusRequest? = null
     private var focusHeld = false
     private var manageAudioFocus = true
+    private var forwardMedia = true
+    private var connected = false
     private var appContext: Context? = null
     private var geelyInput: GeelySteeringWheelInputChannel? = null
     private var keyLogMonitor: SteeringKeyLogMonitor? = null
@@ -73,7 +75,7 @@ internal object CarPlayMediaKeys {
 
     @Synchronized
     fun attach(context: Context, next: CarPlayController, manageAudioFocus: Boolean = true,
-        onMediaPlaying: (Boolean) -> Unit = {}) {
+        forwardMedia: Boolean = true, onMediaPlaying: (Boolean) -> Unit = {}) {
         if (controller !== next) {
             releaseLocked()
             artworkOwner = artworkQueue.newSession()
@@ -81,11 +83,35 @@ internal object CarPlayMediaKeys {
         appContext = context.applicationContext
         controller = next
         this.manageAudioFocus = manageAudioFocus
+        this.forwardMedia = forwardMedia
         steeringProfile = SteeringProfiles.loadEnabled(context)
         next.playbackListener = { playing -> onMediaPlaying(playing); onIphonePlaying(next, playing) }
         next.nowPlayingListener = { update -> onNowPlayingChanged(next, update) }
         next.artworkListener = { id, bytes -> onArtworkChanged(next, id, bytes) }
         syncGeelyInputLocked()
+    }
+
+    /** Register transport controls before the first music packet, without stealing audio focus. */
+    @Synchronized
+    fun onSessionConnected(expected: CarPlayController?) {
+        if (expected == null || controller !== expected) return
+        connected = true
+        if (forwardMedia && session == null) appContext?.let { start(it, acquireFocus = false) }
+        publishPlaybackStateLocked()
+    }
+
+    @Synchronized
+    fun onSessionDisconnected(expected: CarPlayController?) {
+        if (expected == null || controller !== expected) return
+        connected = false
+        session?.let { it.isActive = false; it.release() }
+        session = null
+    }
+
+    @Synchronized
+    private fun recordEvent(line: String) {
+        if (observedKeys.size >= 40) observedKeys.removeFirst()
+        observedKeys.addLast(line)
     }
 
     /** Ends key handling for [expected]; a newer controller's state is left alone. */
@@ -196,6 +222,7 @@ internal object CarPlayMediaKeys {
 
     private fun onGeelySteeringKey(event: GeelySteeringKeyEvent) {
         mainHandler.post {
+            recordEvent("oneOs normalized=${event.keyCode} raw=${event.rawKeyCode} event=${event.action}")
             if (learning != null || steeringProfile?.bindings?.any { it.source == "oneos" } == true) {
                 onObservedKey(SteeringObservedKey(event.keyCode, event.action, "oneos"))
                 return@post
@@ -246,7 +273,8 @@ internal object CarPlayMediaKeys {
 
     fun steeringDiagnostics(): String = synchronized(this) {
         val permitted = appContext?.checkSelfPermission(android.Manifest.permission.READ_LOGS) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        "systemLogAccess=$permitted\n" + (geelyInput?.diagnostics() ?: "oneOs INACTIVE") + "\n" +
+        "systemLogAccess=$permitted mediaSession=${session?.isActive == true} connected=$connected " +
+            "forwardMedia=$forwardMedia manageFocus=$manageAudioFocus focusHeld=$focusHeld mediaAudioActive=$mediaAudioActive\n" + (geelyInput?.diagnostics() ?: "oneOs INACTIVE") + "\n" +
             (keyLogMonitor?.diagnostics() ?: "logMonitor INACTIVE") + "\n" + observedKeys.joinToString("\n")
     }
 
@@ -301,7 +329,9 @@ internal object CarPlayMediaKeys {
             "next" -> send(CarPlayMediaButton.NEXT, source)
             "previous" -> send(CarPlayMediaButton.PREVIOUS, source)
             "siri" -> {
+                if (!forwardMedia || !connected) { recordEvent("Steering voice skipped source=$source"); return }
                 val sent = synchronized(this) { controller }?.requestSiri() == true
+                recordEvent("Steering voice source=$source sent=$sent")
                 Log.i(TAG, "Steering voice key source=$source sent=$sent")
             }
         }
@@ -320,13 +350,13 @@ internal object CarPlayMediaKeys {
 
     private fun updateLocked(active: Boolean) {
         val context = appContext ?: return
-        if (controller == null) return
+        if (controller == null || !forwardMedia) return
         mediaAudioActive = active
         if (active && session == null) start(context) else if (active) regainFocusLocked()
         publishPlaybackStateLocked()
     }
 
-    private fun start(context: Context) {
+    private fun start(context: Context, acquireFocus: Boolean = true) {
         val audio = context.getSystemService(AudioManager::class.java)
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(
@@ -341,7 +371,7 @@ internal object CarPlayMediaKeys {
                 if (change == AudioManager.AUDIOFOCUS_LOSS) synchronized(this) { focusHeld = false }
             }, mainHandler)
             .build()
-        val granted = manageAudioFocus && audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        val granted = acquireFocus && manageAudioFocus && audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         focusRequest = request.takeIf { manageAudioFocus }
         focusHeld = granted
         session = MediaSession(context, "DiPlay CarPlay").apply {
@@ -353,6 +383,7 @@ internal object CarPlayMediaKeys {
     }
 
     private fun releaseLocked() {
+        connected = false
         geelyInput?.close()
         geelyInput = null
         keyLogMonitor?.close()
@@ -401,6 +432,10 @@ internal object CarPlayMediaKeys {
         val group = if (source in listOf("oneos", "logcat", "broadcast")) source else "media_session"
         val now = SystemClock.elapsedRealtime()
         synchronized(this) {
+            if (!forwardMedia || !connected) {
+                recordEvent("media key skipped source=$group bluetoothOutput=${!forwardMedia} connected=$connected")
+                return
+            }
             if (learning != null || now < suppressedUntil) return
             if (lastSentButton == index && group != lastSentSource && now - lastSentAt < 120L) return
             lastSentButton = index; lastSentSource = group; lastSentAt = now
@@ -412,6 +447,7 @@ internal object CarPlayMediaKeys {
             return
         }
         val sent = synchronized(this) { controller }?.sendMediaButton(index) ?: false
+        recordEvent("media key source=$source button=$index sent=$sent")
         Log.i(TAG, "media key $source -> CarPlay $index sent=$sent")
     }
 

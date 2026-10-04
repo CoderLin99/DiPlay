@@ -359,6 +359,7 @@ class AndroidMediaSink(
     }
 
     override fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {
+        runCatching { onAudioDiagnostic("Microphone request stream=$id rate=${config.sampleRate} codec=${config.codec}") }
         // This callback runs on the downlink thread; microphone failures must not stop playback.
         try {
             if (config.audioType == "telephony") enterCommunicationMode(id)
@@ -378,6 +379,7 @@ class AndroidMediaSink(
     }
 
     override fun onMicrophoneStopped(id: AudioStreamId) {
+        runCatching { onAudioDiagnostic("Microphone stop stream=$id wasActive=${microphoneUplinks.containsKey(id)}") }
         try {
             microphoneUplinks.remove(id)?.close()
         } finally {
@@ -394,6 +396,7 @@ class AndroidMediaSink(
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
             communicationModeStream = id
             Log.i("xcertplay-usb", "audio mode $savedAudioMode -> ${manager.mode} for telephony stream=$id")
+            runCatching { onAudioDiagnostic("Audio mode previous=$savedAudioMode current=${manager.mode} stream=$id") }
         }
     }
 
@@ -406,8 +409,10 @@ class AndroidMediaSink(
             try {
                 manager.mode = savedAudioMode
                 Log.i("xcertplay-usb", "audio mode restored to ${manager.mode}")
+                runCatching { onAudioDiagnostic("Audio mode restored=${manager.mode}") }
             } catch (error: RuntimeException) {
                 Log.w("xcertplay-usb", "could not restore audio mode $savedAudioMode", error)
+                runCatching { onAudioDiagnostic("Audio mode restore failed=${error.javaClass.simpleName}") }
             }
         }
     }

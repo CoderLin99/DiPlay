@@ -231,6 +231,7 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        SecondaryDisplayProbe.stop()
         startupHotspotCancelled = true
         super.onStop()
         if (!isFinishing && !isChangingConfigurations) CenterMapOverlay.scheduleShow()
@@ -462,7 +463,7 @@ class DiPlayActivity : ComponentActivity() {
                     toast(getString(R.string.problem_description_too_long))
                 } else {
                     reportIssueDescription = description
-                    prepareGitHubReport(description)
+                    prepareFeedbackReport(description)
                 }
             }.apply { isEnabled = !reportUploadInProgress }
             card.addView(reportUploadButton, matchButton(12, 60))
@@ -550,6 +551,17 @@ class DiPlayActivity : ComponentActivity() {
             }
         }
         section(content, getString(R.string.geely_vehicle), R.drawable.ic_dp_navigation) { card ->
+            choice(card, getString(R.string.geely_audio_output),
+                listOf(getString(R.string.geely_audio_carplay), getString(R.string.geely_audio_bluetooth)),
+                if (AirPlayPersistence.loadBluetoothAudioOutput(this)) 1 else 0) {
+                AirPlayPersistence.saveBluetoothAudioOutput(this, it == 1)
+            }
+            card.addView(label(getString(R.string.geely_audio_hint), 14, MUTED))
+            toggle(card, getString(R.string.geely_handoff), getString(R.string.geely_handoff_hint),
+                AirPlayPersistence.loadGeelyBluetoothHandoff(this)) {
+                AirPlayPersistence.saveGeelyBluetoothHandoff(this, it)
+                toast(getString(R.string.geely_reconnect_required))
+            }
             toggle(
                 card,
                 getString(R.string.geely_hud_navigation),
@@ -566,9 +578,7 @@ class DiPlayActivity : ComponentActivity() {
             } else {
                 val savedDisplayId = AirPlayPersistence.loadGeelyHudDisplayId(this)
                 val savedDisplayName = AirPlayPersistence.loadGeelyHudDisplayName(this)
-                val selectedDisplayIndex = hudDisplays.indexOfFirst {
-                    it.id == savedDisplayId || it.name == savedDisplayName
-                }
+                val selectedDisplayIndex = GeelyHudProjection.selectedIndex(hudDisplays, savedDisplayId, savedDisplayName)
                 val displayOptions = listOf(getString(R.string.geely_hud_projection_auto)) +
                     hudDisplays.map {
                         getString(
@@ -586,6 +596,17 @@ class DiPlayActivity : ComponentActivity() {
                     selectedDisplayIndex + 1,
                     reconnects = false,
                 ) { index -> GeelyHudProjection.selectDisplay(this, hudDisplays.getOrNull(index - 1)) }
+                card.addView(button(getString(R.string.geely_probe), false) {
+                    if (!Settings.canDrawOverlays(this)) { openOverlayPermission(); return@button }
+                    val choices = hudDisplays.map { "ID ${it.id} · ${it.name} · ${it.width}×${it.height}" }.toTypedArray()
+                    AlertDialog.Builder(this).setTitle(getString(R.string.geely_probe_title))
+                        .setItems(choices) { _, which ->
+                            val shown = SecondaryDisplayProbe.show(this, hudDisplays[which].id)
+                            toast(getString(if (shown) R.string.geely_probe_started else R.string.geely_probe_failed))
+                        }.setNegativeButton(getString(R.string.close), null).show()
+                }, matchButton(10, 60))
+                card.addView(button(getString(R.string.geely_probe_stop), false) { SecondaryDisplayProbe.stop() }, matchButton(8, 56))
+                card.addView(label(getString(R.string.geely_probe_hint), 14, MUTED))
             }
             toggle(
                 card,
@@ -2243,6 +2264,15 @@ class DiPlayActivity : ComponentActivity() {
         appendLine("Startup settings: openAfterBoot=${AirPlayPersistence.loadAutoStartOnBoot(appContext)} " +
             "connectWhenOpened=${DiPlayPreferences.autoConnect(appContext)}")
         appendLine()
+        appendLine("--- Audio settings (reconnect to apply changes) ---")
+        appendLine(AudioRoutingSnapshot.capture(appContext))
+        appendLine("output=${if (AirPlayPersistence.loadBluetoothAudioOutput(appContext)) "bluetooth" else "carplay"} " +
+            "factoryHandoff=${AirPlayPersistence.loadGeelyBluetoothHandoff(appContext)} " +
+            "focusEnabled=${AirPlayPersistence.loadAudioFocusEnabled(appContext)} " +
+            "mediaChannel=${AirPlayPersistence.loadMediaAudioChannel(appContext)} " +
+            "navigationChannel=${AirPlayPersistence.loadNavigationAudioChannel(appContext)}")
+        appendLine("--- Display identification ---")
+        appendLine(SecondaryDisplayProbe.diagnostics(appContext))
         appendLine("--- HUD projection ---")
         appendLine(GeelyHudProjection.diagnosticReport(appContext))
         appendLine()
@@ -2263,7 +2293,7 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
 
-    private fun prepareGitHubReport(issueDescription: String) {
+    private fun prepareFeedbackReport(issueDescription: String) {
         if (reportUploadInProgress) return
         reportUploadInProgress = true
         reportUploadButton?.apply { isEnabled = false; text = getString(R.string.uploading_to_cloud) }
@@ -2282,10 +2312,10 @@ class DiPlayActivity : ComponentActivity() {
                 result.onSuccess { (draft, saved) ->
                     AlertDialog.Builder(this)
                         .setTitle(getString(R.string.github_report_ready))
-                        .setMessage(getString(R.string.github_report_instructions, fileName))
-                        .setPositiveButton(getString(R.string.github_open_issue)) { _, _ -> openProjectLink(draft.url) }
+                        .setMessage(getString(R.string.github_report_instructions, fileName) + "\n" + getString(if (saved.savedInApp) R.string.diagnostic_report_saved_in_app else R.string.reports_save_to_downloads_diplay))
+                        .setNeutralButton(getString(R.string.github_open_issue)) { _, _ -> openProjectLink(draft.url) }
                         .setNegativeButton(getString(R.string.view_diagnostic_report)) { _, _ -> showDiagnosticReport(draft.report) }
-                        .setNeutralButton(getString(R.string.share)) { _, _ ->
+                        .setPositiveButton(getString(R.string.share)) { _, _ ->
                             runCatching {
                                 startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
@@ -2299,11 +2329,11 @@ class DiPlayActivity : ComponentActivity() {
                 }.onFailure {
                     AlertDialog.Builder(this).setTitle(getString(R.string.report_upload_failed))
                         .setMessage(getString(R.string.report_upload_failed_message))
-                        .setPositiveButton(getString(R.string.retry_report_upload)) { _, _ -> prepareGitHubReport(issueDescription) }
+                        .setPositiveButton(getString(R.string.retry_report_upload)) { _, _ -> prepareFeedbackReport(issueDescription) }
                         .setNegativeButton(getString(R.string.close), null).show()
                 }
             }
-        }, "diplay-github-report").start()
+        }, "diplay-feedback-report").start()
     }
 
     private fun exportDiagnostics(uri: Uri? = null) {
@@ -2335,7 +2365,7 @@ class DiPlayActivity : ComponentActivity() {
                         })
                         .setPositiveButton(getString(R.string.view_diagnostic_report)) { _, _ -> showDiagnosticReport(report) }
                         .setNegativeButton(getString(R.string.done), null)
-                        .setNeutralButton(getString(R.string.share)) { _, _ ->
+                        .setPositiveButton(getString(R.string.share)) { _, _ ->
                             runCatching {
                                 startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"; putExtra(Intent.EXTRA_STREAM, savedReport.uri)

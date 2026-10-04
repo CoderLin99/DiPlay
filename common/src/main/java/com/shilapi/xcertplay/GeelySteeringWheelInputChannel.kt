@@ -13,7 +13,6 @@ import android.os.Looper
 import android.os.Parcel
 import android.os.SystemClock
 import android.util.Log
-import java.util.concurrent.ConcurrentHashMap
 
 internal data class GeelySteeringKeyEvent(
     val keyCode: Int,
@@ -50,7 +49,6 @@ internal class GeelySteeringWheelInputChannel(
         private const val TRANSACTION_REGISTER = 3
         private const val TRANSACTION_UNREGISTER = 4
         private const val CONNECT_RETRY_MS = 2_000L
-        private const val RAW_GESTURE_WINDOW_MS = 1_500L
 
         fun isKnownGeelyHeadUnit(): Boolean = Build.MODEL.orEmpty().uppercase().let { model ->
             model.contains("G636") || model.contains("FX11") || model.contains("KX11")
@@ -64,8 +62,14 @@ internal class GeelySteeringWheelInputChannel(
     private val app = context.applicationContext
     private val lock = Any()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val lastRawUpAt = ConcurrentHashMap<Int, Long>()
-    @Volatile private var requestedKeys = GeelySteeringKeyCodes.supported
+    private val recentEvents = ArrayDeque<String>()
+    private val eventDecoder = GeelySteeringEventDecoder(
+        record = { line -> synchronized(lock) {
+            if (recentEvents.size >= 32) recentEvents.removeFirst()
+            recentEvents.addLast(line)
+        } },
+        emit = onEvent,
+    )
     private var registeredKeys = intArrayOf()
     private var serviceManager: IBinder? = null
     private var inputManager: IBinder? = null
@@ -107,37 +111,10 @@ internal class GeelySteeringWheelInputChannel(
             if (code !in 1..6) return super.onTransact(code, data, reply, flags)
             data.enforceInterface(INPUT_LISTENER_DESCRIPTOR)
             val rawKeyCode = data.readInt()
-            val keyCode = GeelySteeringKeyCodes.canonicalize(rawKeyCode) ?: rawKeyCode
-            val now = SystemClock.elapsedRealtime()
-            when (code) {
-                1 -> {
-                    val action = data.readInt()
-                    data.readInt() // OneOS soft-key function; the key code identifies the press.
-                    if (rawKeyCode >= GeelySteeringKeyCodes.EXTENDED_KEY_MIN &&
-                        keyCode in requestedKeys &&
-                        (action == GeelySteeringKeyEvent.ACTION_DOWN || action == GeelySteeringKeyEvent.ACTION_UP)
-                    ) {
-                        if (action == GeelySteeringKeyEvent.ACTION_UP) lastRawUpAt[keyCode] = now
-                        onEvent(GeelySteeringKeyEvent(keyCode, rawKeyCode, action, now))
-                    }
-                }
-                else -> {
-                    data.readInt() // OneOS soft-key function.
-                    val directAction = when (code) {
-                        2 -> GeelySteeringKeyEvent.ACTION_SINGLE
-                        5 -> GeelySteeringKeyEvent.ACTION_LONG
-                        6 -> GeelySteeringKeyEvent.ACTION_DOUBLE
-                        else -> null
-                    }
-                    val rawSequenceRecentlyCompleted = now - (lastRawUpAt[keyCode] ?: 0L) < RAW_GESTURE_WINDOW_MS
-                    if (rawKeyCode >= GeelySteeringKeyCodes.EXTENDED_KEY_MIN &&
-                        keyCode in requestedKeys &&
-                        directAction != null &&
-                        !rawSequenceRecentlyCompleted
-                    ) {
-                        onEvent(GeelySteeringKeyEvent(keyCode, rawKeyCode, directAction, now))
-                    }
-                }
+            val action = if (code == 1) data.readInt() else -1
+            data.readInt() // OneOS soft-key function.
+            synchronized(lock) {
+                if (enabled && !closed) eventDecoder.accept(code, rawKeyCode, action, SystemClock.elapsedRealtime())
             }
             reply?.writeNoException()
             return true
@@ -193,7 +170,7 @@ internal class GeelySteeringWheelInputChannel(
     }
 
     fun diagnostics(): String = synchronized(lock) {
-        "oneOs enabled=$enabled bound=$bound input=${inputManager != null} registered=${registeredKeys.size}"
+        "oneOs enabled=$enabled bound=$bound input=${inputManager != null} registered=${registeredKeys.size}\n" + recentEvents.joinToString("\n")
     }
 
     private fun bindLocked() {

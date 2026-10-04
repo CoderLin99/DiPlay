@@ -157,6 +157,7 @@ class CarPlayController(
     private val clearPairRecord: () -> Unit = {},
     private val locationProvider: Iap2LocationProvider? = null,
     private val vehicleStatusProvider: com.shilapi.xcertplay.transport.VehicleStatusProvider? = null,
+    private val factoryBluetoothHandoffEnabled: Boolean = false,
 ) : Closeable {
     init {
         require(!config.locationReportingEnabled || locationProvider != null) {
@@ -281,9 +282,8 @@ class CarPlayController(
                 }
             }
             activeSession = session
-            if (geelyFactory != null) {
-                wirelessPeerBluetoothAddress?.let { configureBluetoothAudioHandoff(session, it) }
-            }
+            debugLog("Audio policy output=${if (airPlayConfig.disableAudioOutput) "bluetooth" else "carplay"} " +
+                "factoryHandoff=$factoryBluetoothHandoffEnabled")
             debugLog(
                 "AirPlay session active controller=${session.controllerId ?: "unknown"} " +
                     "peer=${session.host}",
@@ -364,6 +364,9 @@ class CarPlayController(
                     else -> null
                 }
                 address?.let { configureBluetoothAudioHandoff(session, it) }
+            }
+            if (type == "modesChanged") {
+                debugLog(com.shilapi.xcertplay.airplay.AirPlayModeDiagnostics.summary(params))
             }
             debugLog(
                 "AirPlay command type=$type params=${params.keys.sorted().joinToString(",")}",
@@ -2105,6 +2108,10 @@ class CarPlayController(
         }
 
     private fun configureBluetoothAudioHandoff(session: AirPlaySession, address: String) {
+        if (geelyFactory == null || !factoryBluetoothHandoffEnabled || airPlayConfig.disableAudioOutput) {
+            debugLog("Factory Bluetooth music preserved: automatic disconnect disabled")
+            return
+        }
         if (!BluetoothAdapter.checkBluetoothAddress(address.uppercase(Locale.US))) return
         mainHandler.post {
             if (closed || activeSession !== session || factoryBluetoothSession === session) return@post

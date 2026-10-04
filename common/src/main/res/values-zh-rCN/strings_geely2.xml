@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="geely_audio_output">音频输出</string>
+    <string name="geely_audio_carplay">CarPlay 音频</string>
+    <string name="geely_audio_bluetooth">原车蓝牙音频（兼容）</string>
+    <string name="geely_audio_hint">更改后重新连接。蓝牙模式保留画面，关闭 CarPlay 音频输出；请在 iPhone 上选择车机蓝牙音源。媒体按键交给原车音源处理。</string>
+    <string name="geely_handoff">原厂蓝牙交接（实验）</string>
+    <string name="geely_handoff_hint">默认关闭。开启后，收到手机交接请求时，每次会话最多断开一次蓝牙音乐。仅用于验证已确认的音源冲突；原车蓝牙模式始终保留连接。</string>
+    <string name="geely_reconnect_required">请重新连接 CarPlay 使更改生效。</string>
+    <string name="geely_probe">识别副屏（显示 5 秒）</string>
+    <string name="geely_probe_title">停车后选择要识别的副屏</string>
+    <string name="geely_probe_started">已申请显示标记，请确认 ID 出现的位置；5 秒后自动移除。</string>
+    <string name="geely_probe_failed">无法显示标记，请导出诊断报告查看原因。</string>
+    <string name="geely_probe_stop">立即移除副屏标记</string>
+    <string name="geely_probe_hint">停车后逐个识别。副屏右上角显示青色 ID 小标记，5 秒后消失。此功能只识别屏幕，不启用地图，也不更改已选的 HUD 屏幕。</string>
+</resources>
