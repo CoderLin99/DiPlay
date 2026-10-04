@@ -1,5 +1,11 @@
 # Unreleased
 
+## Upstream main sync — 2026-10-04
+
+- Merge shihabal3amri/DiPlay main through 6148bc1 (PRs #170, #171 and #172): optional USB permission auto-confirm, DiLink 3.0/3.5 virtual map cards, and multi-window layout/resolution support.
+- Preserve Geely audio/key ownership, the single destination-picker diagnostic export, persisted display probes, factory fullscreen compatibility and settings safe-area padding.
+- These source changes are newer than the existing geely.3 APK; this sync does not publish a new release or claim Geely instrument-map support.
+
 ## CoderLin99 0.2.11-geely.3 (vehicle verification build)
 
 - On Geely, wait for an actual CarPlay media stream before registering media controls or forwarding media keys. Video-only sessions leave factory Bluetooth controls alone; preserve controls through a pause after CarPlay audio has been established.
