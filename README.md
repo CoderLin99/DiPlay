@@ -1,63 +1,67 @@
-# DiPlay
+# DiPlay · 吉利博越 L（2023 款）适配分支
 
-**CarPlay for compatible BYD Android head units.** Wired and wireless, with the familiar DiAuto interface. Independent app: `com.shihab.diplay`.
+**面向 2023 款吉利博越 L、银河 OS 2.5.0 的 CarPlay 适配与问题修复分支。** 重点处理车机音频、方向盘媒体按键、副屏识别和离线诊断。
 
-> **BYD support scope:** These projects focus on BYD cars. They may work on other brands, but other brands are unsupported and there are no plans to add support or fix brand-specific incompatibilities.
+本仓库由 **CoderLin99** 维护，基于 [DiPlay 上游](https://github.com/shihabal3amri/DiPlay)，整合 [carlito12345 的吉利适配](https://github.com/carlito12345/DiPlay)并继续修改。这是社区实验性适配，不代表吉利或 Apple 官方支持，也不保证其他年款、车型或车机版本兼容。
 
-[Download & website](https://shihabal3amri.github.io/DiPlay/) · [Release](https://github.com/shihabal3amri/DiPlay/releases/tag/v0.2.11) · [Report a problem](https://github.com/shihabal3amri/DiPlay/issues/new/choose)
+[本仓库版本与下载](https://github.com/CoderLin99/DiPlay/releases) · [反馈问题](https://github.com/CoderLin99/DiPlay/issues) · [构建检查](https://github.com/CoderLin99/DiPlay/actions/workflows/android.yml) · [修改记录](CHANGELOG.md)
 
-![DiPlay home](site/assets/home.png)
+## 适配环境与当前状态
 
-## 0.2.11 — public preview
+| 项目 | 说明 |
+| --- | --- |
+| 目标车型 | 吉利博越 L，2023 款 |
+| 目标车机 | 银河 OS 2.5.0，Android 11 / FX11；需要能够安装第三方 APK |
+| 手机侧 | iPhone；目前需求以高德导航为主 |
+| 上游基线 | DiPlay v0.2.11 |
+| 本分支构建 | **0.2.11-geely.2**，versionCode 31 |
+| 验证进度 | 已有目标车辆 CarPlay 画面正常的反馈；`.2` 的音频与方控修改仍待实车验证 |
 
-Install on the **car**, not the iPhone. No jailbreak, dongle, Mac, account or authentication server is required for use. Core CarPlay does not require ADB; optional dashboard, battery, wheel-speed and parked-video features do. Your head unit must permit APK installation. Wireless supports Wi-Fi Direct or the car’s existing hotspot; Wi-Fi Direct requires Android 10+; the APK supports Android 9+ for wired use.
+截至 2026-10-04，`.2` 已完成签名构建，通过 **794 项自动测试**和静态检查。自动检查不能替代装车验证。目前安装包保存在维护者的 **Release 草稿**中，尚未公开发布；草稿仅有权限的维护者可见，公开发布后可在本仓库 Releases 下载。
 
-- Wired USB and wireless CarPlay with local authentication.
-- BYD HUD navigation with arrows, distance and street names on verified firmware.
-- Car hotspot support, improved audio buffering and saved receive diagnostics.
-- Automatic address discovery, fixed-channel Wi-Fi fallbacks and successful-configuration memory.
-- Icon/text size, resolution and frame rate; applying a display change reconnects CarPlay.
-- Local diagnostic export. Reports are sent only if you choose to share them.
-- Separate installation alongside DiAuto. Run one projection app at a time.
+## 本分支做了什么
 
-This is **not an Apple-certified product**. The APK bundles an experimental accessory identity recovered from public Carlinkit firmware, not a newly provisioned MFi identity for DiPlay. A bundled private key is extractable. Acceptance after future iOS updates, reliability across head units and suitability of that identity for general distribution are unresolved. This release invites community testing; it is not a guarantee of universal compatibility.
+| 功能 | 已有修改与边界 |
+| --- | --- |
+| CarPlay 连接 | 继承有线 USB 与无线 CarPlay；已有目标车辆画面、操作正常的反馈 |
+| 车机音频 | 默认保留原车蓝牙音乐连接，取消反复断开行为；新增“原车蓝牙音频（兼容）”模式，实际出声情况待装车确认 |
+| 方向盘切歌、播放/暂停 | 修正标准 OneOS 键码处理和重复事件，连接后提前建立媒体控制入口；是否仍会触发原厂音乐需要实测 |
+| 副屏识别 | 可以手动选择副屏，显示 5 秒青色 ID 标记；修正同名屏幕选择，记录显示权限与窗口状态 |
+| 导航指引 | 保留吉利 HUD 转向、距离等指引投射路径；目标车辆的显示位置与可用性尚未确认 |
+| 离线故障反馈 | 生成、保存和分享 TXT 报告，车机无需联网或登录 GitHub；补充音频协商、按键、录音路由和副屏诊断 |
 
-Earlier releases were tested on the development DiLink5.1 car: live windshield guidance and street names work, Car hotspot now starts CarPlay, and Wi-Fi Direct performance is substantially improved. Occasional audio cutouts remain and are deferred to a later update. The floating-map test build was installed on the development DiLink 5.1 car; feedback led to the pinch corrections in 0.2.9. Earlier wheel-speed and video contributions were tested on a BYD Tang with DiLink 5.0 and an iPhone 15 Pro on iOS 27; wheel-speed dead reckoning in tunnels remains unverified. Broader head-unit and iOS compatibility is not guaranteed. The HUD firmware scope and cleanup limits are documented in [BYD navigation](docs/BYD_NAVIGATION.md).
+### 尚未实现或解决
 
-## What’s new in 0.2.11
+- **完整仪表地图尚未实现。** 将仪表右侧音乐区域替换为高德地图是后续目标，需先确认副屏区域、权限及地图视频来源。不能仅凭屏幕分辨率判断它对应哪块物理区域。
+- **连接原车蓝牙时微信录音无声仍待定位。** 目前反馈是关闭蓝牙后恢复；本版增加了车机侧诊断，没有宣称修复，也无法直接读取 iPhone 内部的微信录音路由。
+- 音频修正和方控转发已有代码与自动测试，尚不能承诺原厂应用不再抢占音源或响应按键。
+- 上游的 BYD 专属车辆数据、仪表地图等能力，不等于已适配吉利。
 
-- **Preferred Wi-Fi Direct channel**: Auto remains the default; save a supported 2.4/5 GHz channel for the next connection. Rejected or mismatched manual channels report an error. Channel choice is not a confirmed stutter fix.
-- A custom dashboard turn card with size choices and position changes in 2% steps. Unknown maneuvers show no guessed arrow; expired guidance clears.
-- Two-, three- or four-finger settings swipes, keeping three as the default, plus Android TV/remote controls that preserve ordinary touch and knob behavior.
-- Opt-in read-only legacy vehicle-data detection under Location → Advanced vehicle data. Default DiLink 5.0 mode remains the default; only accepted fields/readings become runtime data. Stale-probe and battery-publication concurrency corrections are included.
-- Optional automatic startup of the existing car hotspot, off by default, with verified permissions limited to DiPlay's own package.
-- Wireless location/vehicle data on the runtime Wi-Fi link and parked-video availability delivered after SETUP/event-channel readiness. Non-P or unreadable gear still closes video.
-- Retain artists across partial song updates and publish media-session metadata/artwork only when changed; position/play state keep updating.
-- Android 9 audio API compatibility, failed-codec cleanup, settled-size/readiness checks after reconnect, an exact-error Android 10 P2P compatibility path in Auto mode, and a wired VPN restricted to DiPlay.
-- Bounded wireless/media/theme and own-app exit diagnostics, without audio/video/packet payload recording or automatic uploads.
+## 安装与验证
 
-Optional legacy vehicle data, battery, wheel speed and parked video require authorized network ADB and supported readings. Dashboard, hotspot and audio effects depend on firmware and Android support. See [0.2.11 release notes](docs/RELEASE-NOTES-0.2.11.md) and [validation](docs/VALIDATION.md) for review corrections and device-test limits. Qin Plus startup, Wi-Fi Direct stutter, Siri/microphone quality, iOS 15 connection and day/night firmware reports still need fresh hardware evidence.
+APK 安装在**车机**上。普通 CarPlay 连接不要求先连接电脑 ADB；特殊车机权限或副屏问题的进一步排查可能需要 ADB。
 
-If a problem remains, reproduce it on **0.2.11**, then use **Settings → Diagnostics → Save diagnostic report**. Android 10+ saves to **Downloads/DiPlay**; Android 9 uses the document picker. Review the `.txt` file and attach it to your existing [issue](https://github.com/shihabal3amri/DiPlay/issues), including vehicle/firmware, phone/iOS, connection mode, steps and failure time. Reports are shared only when you choose; never post your hotspot password.
+1. 使用本分支安装包。`.2` 沿用 CoderLin99 的 `.1` 签名，可以覆盖升级；与其他作者签名的 APK 不保证能够直接覆盖。
+2. 在“设置 → 吉利车机”保持“原厂蓝牙交接（实验）”关闭，先测试 CarPlay 播放、暂停和切歌。
+3. 若画面正常但声音仍从手机播放，在“音频输出”中选择“原车蓝牙音频（兼容）”并重连，在 iPhone 上选择车机蓝牙输出。此模式保留 CarPlay 画面，媒体控制交给原车音源。
+4. **停车后**使用“识别副屏”，逐个记录青色 ID 标记出现的位置。标记 5 秒后自动移除，也可立即关闭；这一步不会启用完整地图。
 
-## Documentation
+更多通用连接方法见[安装说明](docs/INSTALL.md)。其中涉及 BYD 固件的内容不能直接视为博越 L 的适配结论。
 
-- [Install and connect](docs/INSTALL.md)
-- [Compatibility and troubleshooting](docs/COMPATIBILITY.md)
-- [Privacy and diagnostic reports](docs/PRIVACY.md)
-- [Build from source](docs/BUILD.md)
-- [Validation](docs/VALIDATION.md)
-- [Release notes](CHANGELOG.md)
-- [Credits and licenses](docs/THIRD_PARTY_NOTICES.md)
+## 如何反馈问题
 
-The website is available in English, Arabic, Russian, Ukrainian, Spanish and Simplified Chinese. The app interface supports those same six languages. Choose the app language in Settings; on Android 13+, it stays synchronized with Android’s per-app language setting.
+复现后使用“**生成离线故障反馈**”或“保存诊断报告”，保存、查看或分享 `.txt`。车机不必登录 GitHub，可把报告转到手机或电脑后，在[本仓库 Issues](https://github.com/CoderLin99/DiPlay/issues)提交。
 
-## Source and credits
+请注明车型与年款、车机版本、DiPlay 版本、iPhone/iOS、连接方式、音频输出模式、复现步骤及大致发生时间。副屏问题请补充标记 ID 和实际显示位置。
 
-Based on [xcertplay](https://github.com/shilapi/xcertplay), GPL-3.0. The home/settings UI and website adapt [DiAuto](https://github.com/shihabal3amri/DiAuto), AGPL-3.0; that license is included in `docs/licenses`. Preserve those notices when distributing modifications. CarPlay and its icon belong to Apple Inc.; no Apple or BYD affiliation or endorsement is implied.
+**报告不会自动上传到 GitHub，也不会自动提交到原作者的日志服务器。** 分享前检查内容，移除不想公开的个人信息，勿公开热点密码。参阅[隐私与诊断说明](docs/PRIVACY.md)。
 
-This repository starts with a clean public source snapshot. Local research, tester reports and release-signing secrets are excluded. The complete source corresponding to the APK is provided with every release; experimental runtime identity assets are described separately in the build instructions and notices.
+## 上游、构建与许可证
 
-## Local release packaging
+- [DiPlay 上游](https://github.com/shihabal3amri/DiPlay)与 [carlito12345 吉利适配分支](https://github.com/carlito12345/DiPlay)。
+- [上游英文 README 存档](docs/UPSTREAM-README.md)与[中文存档](docs/UPSTREAM-README.zh-CN.md)，用于了解原项目；其中的支持范围和下载链接属于上游。
+- [源码构建](docs/BUILD.md)、[修改记录](CHANGELOG.md)、[第三方声明与许可证](docs/THIRD_PARTY_NOTICES.md)。
 
-The release APK intentionally contains the experimental accessory identity. The Git repository and source archive exclude all accessory and Android signing keys; tests generate synthetic identities at runtime. Source/CI builds omit runtime identity assets by default. Local release builds explicitly select an external asset directory. Publishing the APK makes its bundled identity extractable; building locally does not preserve that identity's confidentiality.
+项目基于 [xcertplay](https://github.com/shilapi/xcertplay)，采用 GPL-3.0；主页、设置界面和网站参考 [DiAuto](https://github.com/shihabal3amri/DiAuto)，相关 AGPL-3.0 许可证保留在 `docs/licenses`。分发修改时请保留原有声明。CarPlay 及其图标属于 Apple Inc.；本项目与 Apple、吉利或比亚迪无官方隶属或背书关系。
+
+本项目未经 Apple 认证。发行 APK 使用从公开 Carlinkit 固件提取的实验性配件身份，并非为 DiPlay 新签发的 MFi 身份；APK 中的身份可被提取，后续 iOS 的接受情况与兼容性未获保证。Git 仓库和源码压缩包不包含配件身份或 Android 签名密钥，普通源码/CI 构建默认不配置运行身份；发行构建需按构建文档提供外部资源。发布 APK 时应同时提供对应源码。
