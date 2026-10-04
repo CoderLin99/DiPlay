@@ -1,5 +1,11 @@
 # Unreleased
 
+## CoderLin99 0.2.11-geely.4 (vehicle verification build)
+
+- Package the upstream main sync through 6148bc1, including multi-window support, DiLink virtual map cards and optional USB permission auto-confirm.
+- Retain geely.3 media-key ownership, destination-picker report export and persisted display probes. Full Geely instrument maps remain unimplemented.
+- Use versionCode 33 and the existing signing key for an in-place upgrade from earlier CoderLin99 builds.
+
 ## Upstream main sync — 2026-10-04
 
 - Merge shihabal3amri/DiPlay main through 6148bc1 (PRs #170, #171 and #172): optional USB permission auto-confirm, DiLink 3.0/3.5 virtual map cards, and multi-window layout/resolution support.

@@ -98,7 +98,7 @@ jobs:
           sha256sum *.apk *-source.zip > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: DiPlay-0.2.11-geely.3-release
+          name: DiPlay-0.2.11-geely.4-release
           path: build/distribution/*
           if-no-files-found: error
           retention-days: 30
