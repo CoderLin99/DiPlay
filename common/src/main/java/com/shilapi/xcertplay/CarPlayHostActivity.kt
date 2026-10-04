@@ -3195,7 +3195,11 @@ class CarPlayHostActivity : ComponentActivity() {
                     diagnosticLog?.append(formattedLogLine(message, System.currentTimeMillis()))
                 }
             },
-            onMediaAudioChanged = CarPlayMediaKeys::onMediaAudioChanged,
+            onMediaAudioChanged = { active ->
+                runOnUiThread {
+                    if (controllerGeneration == restartGeneration) CarPlayMediaKeys.onMediaAudioChanged(active)
+                }
+            },
             wirelessAudio = wirelessEnabled,
         )
     }

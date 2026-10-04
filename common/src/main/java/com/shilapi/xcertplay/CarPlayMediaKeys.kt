@@ -136,7 +136,8 @@ internal object CarPlayMediaKeys {
 
     /** Called when CarPlay music starts or stops; may run on any thread. */
     fun onMediaAudioChanged(active: Boolean) {
-        mainHandler.post { synchronized(this) { updateLocked(active) } }
+        val expected = synchronized(this) { controller } ?: return
+        mainHandler.post { synchronized(this) { if (controller === expected) updateLocked(active) } }
     }
 
     /** The iPhone started or stopped playing; may run on any thread. */
@@ -329,7 +330,9 @@ internal object CarPlayMediaKeys {
     fun consumesHardwareKey(keyCode: Int): Boolean = synchronized(this) {
         val standard = CarPlayMediaButton.forKeyCode(keyCode) != null || CarPlayMediaButton.opensSiri(keyCode)
         ((learning != null || SystemClock.elapsedRealtime() < suppressedUntil) && standard) ||
-            steeringProfile?.bindings?.any { it.keyCode > 0 && it.keyCode == keyCode } == true
+            (connected && forwardMedia && steeringProfile?.bindings?.any {
+                it.keyCode > 0 && it.keyCode == keyCode && (it.operation == "siri" || canForwardMediaLocked())
+            } == true)
     }
 
     private fun sendSteeringOperation(operation: String, source: String) {

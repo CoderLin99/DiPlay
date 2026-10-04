@@ -80,6 +80,9 @@ class GeelySessionCompatibilityTest {
         val first = controller()
         CarPlayMediaKeys.attach(app, first, manageAudioFocus = false, requireMediaAudio = true)
         CarPlayMediaKeys.onSessionConnected(first)
+        ReflectionHelpers.setField(CarPlayMediaKeys, "steeringProfile", SteeringProfile("test", "FX11",
+            bindings = listOf(SteeringBinding("play_pause", 85, 0, "oneos"))))
+        assertFalse(CarPlayMediaKeys.consumesHardwareKey(85))
         assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaSession=false"))
         ReflectionHelpers.callInstanceMethod<Unit>(CarPlayMediaKeys, "send",
             ReflectionHelpers.ClassParameter.from(Int::class.javaPrimitiveType!!, CarPlayMediaButton.PLAY_PAUSE),
@@ -92,10 +95,13 @@ class GeelySessionCompatibilityTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaAudioEstablished=true"))
         assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaSession=true"))
-        // A replacement connection must prove its own media route.
+        assertTrue(CarPlayMediaKeys.consumesHardwareKey(85))
+        // A queued old renderer notification must not authorize the replacement connection.
+        CarPlayMediaKeys.onMediaAudioChanged(true)
         val second = controller()
         CarPlayMediaKeys.attach(app, second, manageAudioFocus = false, requireMediaAudio = true)
         CarPlayMediaKeys.onSessionConnected(second)
+        shadowOf(Looper.getMainLooper()).idle()
         assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaSession=false"))
         assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaAudioEstablished=false"))
     }
