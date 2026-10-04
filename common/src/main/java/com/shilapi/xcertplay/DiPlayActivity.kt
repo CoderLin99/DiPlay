@@ -2365,7 +2365,7 @@ class DiPlayActivity : ComponentActivity() {
                         })
                         .setPositiveButton(getString(R.string.view_diagnostic_report)) { _, _ -> showDiagnosticReport(report) }
                         .setNegativeButton(getString(R.string.done), null)
-                        .setPositiveButton(getString(R.string.share)) { _, _ ->
+                        .setNeutralButton(getString(R.string.share)) { _, _ ->
                             runCatching {
                                 startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"; putExtra(Intent.EXTRA_STREAM, savedReport.uri)

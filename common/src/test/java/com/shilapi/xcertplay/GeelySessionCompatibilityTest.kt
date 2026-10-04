@@ -24,7 +24,11 @@ import java.net.Socket
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30], manifest = Config.NONE, shadows = [GeelySessionCompatibilityTest.Handoff::class])
 class GeelySessionCompatibilityTest {
-    private val app = RuntimeEnvironment.getApplication()
+    private val app = object : android.content.ContextWrapper(RuntimeEnvironment.getApplication()) {
+        override fun getApplicationContext(): android.content.Context = this
+        // No OEM Binder services exist in this JVM fixture. Do not synthesize a null-component callback.
+        override fun bindService(intent: android.content.Intent, connection: android.content.ServiceConnection, flags: Int): Boolean = false
+    }
     private val controllers = mutableListOf<CarPlayController>()
     private val sessions = mutableListOf<AirPlaySession>()
     private val originalModel = Build.MODEL
