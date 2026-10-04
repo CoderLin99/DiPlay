@@ -7,7 +7,7 @@ internal object GitHubIssueReport {
     const val REPOSITORY = "https://github.com/CoderLin99/DiPlay"
     const val MAX_DESCRIPTION_LENGTH = 2_000
     const val MAX_URL_LENGTH = 7_500
-    const val BUILD = "0.2.11-geely.2"
+    const val BUILD = "0.2.11-geely.3"
 
     data class Draft(val url: String, val report: String)
 

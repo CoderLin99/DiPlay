@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="report_description_optional">故障描述（选填）</string>
+    <string name="report_choose_hint">每次保存都会先选择位置，保存后可查看或分享 TXT。不自动上传，无需登录 GitHub。</string>
+    <string name="report_picker_unavailable">无法打开文件选择器</string>
+    <string name="report_picker_unavailable_hint">车机无法打开系统文件选择器。你可以改存默认位置，再查看或分享日志；保存后会明确显示实际保存位置。</string>
+    <string name="report_save_default">改存默认位置</string>
+    <string name="geely_probe_result_hint">每次识别结果会显示在这里。若实际屏幕没有 ID，请保存诊断报告；系统接受显示请求不等于仪表已经显示。</string>
+</resources>

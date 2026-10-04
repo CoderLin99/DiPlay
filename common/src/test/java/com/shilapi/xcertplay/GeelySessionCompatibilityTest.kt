@@ -76,6 +76,30 @@ class GeelySessionCompatibilityTest {
         assertTrue(state.contains("forwardMedia=false"))
     }
 
+    @Test fun geelyVideoOnlyDoesNotDuplicateBluetoothKeysButRealAudioEnablesControls() {
+        val first = controller()
+        CarPlayMediaKeys.attach(app, first, manageAudioFocus = false, requireMediaAudio = true)
+        CarPlayMediaKeys.onSessionConnected(first)
+        assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaSession=false"))
+        ReflectionHelpers.callInstanceMethod<Unit>(CarPlayMediaKeys, "send",
+            ReflectionHelpers.ClassParameter.from(Int::class.javaPrimitiveType!!, CarPlayMediaButton.PLAY_PAUSE),
+            ReflectionHelpers.ClassParameter.from(String::class.java, "oneos"))
+        assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("awaitingMedia=true"))
+        CarPlayMediaKeys.onMediaAudioChanged(true)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaSession=true"))
+        CarPlayMediaKeys.onMediaAudioChanged(false)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaAudioEstablished=true"))
+        assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaSession=true"))
+        // A replacement connection must prove its own media route.
+        val second = controller()
+        CarPlayMediaKeys.attach(app, second, manageAudioFocus = false, requireMediaAudio = true)
+        CarPlayMediaKeys.onSessionConnected(second)
+        assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaSession=false"))
+        assertTrue(CarPlayMediaKeys.steeringDiagnostics().contains("mediaAudioEstablished=false"))
+    }
+
     private fun controller(): CarPlayController = CarPlayController(app,
         CarPlayRuntimeConfig(mfiTarget = MfiTarget.LOCAL, transport = CarPlayTransport.WIRELESS,
             identification = Iap2IdentificationConfig(name = "test", modelIdentifier = "test", manufacturer = "test",

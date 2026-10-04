@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="report_description_optional">Problem description (optional)</string>
+    <string name="report_choose_hint">Choose where to save each report, then view or share the TXT. Nothing is uploaded automatically. GitHub login is not required.</string>
+    <string name="report_picker_unavailable">File picker unavailable</string>
+    <string name="report_picker_unavailable_hint">This head unit could not open a file picker. You can save to the default location instead, then share or view the report. The destination will be shown after saving.</string>
+    <string name="report_save_default">Save to default location</string>
+    <string name="geely_probe_result_hint">The result of each display identification will appear here. If no ID appears on a physical screen, save a diagnostic report; a successful window request does not confirm visibility.</string>
+</resources>

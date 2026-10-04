@@ -72,13 +72,13 @@ class DiPlayActivity : ComponentActivity() {
     private var initialLaunch = true
     private var notificationTransport = true
     private var exportInProgress = false
-    private var reportUploadInProgress = false
+    private var pendingExportDescription: String? = null
+    private var exportPickerPending = false
     private var reportIssueDescription = ""
     private var navigationStreamType = 14
     private var testToneTrack: AudioTrack? = null
     private var toneStop: Runnable? = null
     private var exportButton: Button? = null
-    private var reportUploadButton: Button? = null
     private var reportIssueInput: EditText? = null
     private var developerVersionTaps = 0
     private var rootScroll: ScrollView? = null
@@ -151,7 +151,10 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
     private val export = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        if (uri != null) exportDiagnostics(uri)
+        val description = pendingExportDescription
+        pendingExportDescription = null
+        exportPickerPending = false
+        if (uri != null) exportDiagnostics(uri, description)
     }
     private val iconImageCrop = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK) render()
@@ -189,6 +192,8 @@ class DiPlayActivity : ComponentActivity() {
         }
         pendingCarHotspotSetup = savedInstanceState?.getBoolean("pending_car_hotspot") ?: false
         reportIssueDescription = savedInstanceState?.getString("report_issue_description").orEmpty()
+        pendingExportDescription = savedInstanceState?.getString("pending_export_description")
+        exportPickerPending = savedInstanceState?.getBoolean("export_picker_pending") ?: false
         bydVehicleAdvancedExpanded = savedInstanceState?.getBoolean("byd_vehicle_advanced") ?: false
         page = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: "home"
         render()
@@ -214,6 +219,8 @@ class DiPlayActivity : ComponentActivity() {
         outState.putString("page", page)
         outState.putBoolean("pending_car_hotspot", pendingCarHotspotSetup)
         outState.putString("report_issue_description", reportIssueDescription)
+        outState.putString("pending_export_description", pendingExportDescription)
+        outState.putBoolean("export_picker_pending", exportPickerPending)
         outState.putBoolean("byd_vehicle_advanced", bydVehicleAdvancedExpanded)
         super.onSaveInstanceState(outState)
     }
@@ -231,7 +238,7 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        SecondaryDisplayProbe.stop()
+        SecondaryDisplayProbe.stop("settings_stopped")
         startupHotspotCancelled = true
         super.onStop()
         if (!isFinishing && !isChangingConfigurations) CenterMapOverlay.scheduleShow()
@@ -282,7 +289,7 @@ class DiPlayActivity : ComponentActivity() {
         // A restore still waiting for layout keeps its target: the old page was never laid out.
         val previousScrollY = (pendingScrollY ?: rootScroll?.scrollY)?.takeIf { renderedPage == page }
         status = null; connectButton = null; disconnectButton = null; lastRunning = null
-        reportUploadButton = null; reportIssueInput = null
+        reportIssueInput = null
         bydAdbControls = null
         adbSwitches.clear()
         adbStatus = null
@@ -433,16 +440,8 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(button(getString(R.string.open_connection_setup), false) { page = "connection"; render() }, matchButton(12, 60))
         }
         section(content, getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
-            exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) exportDiagnostics()
-                else chooseReportDestination()
-            }.apply { isEnabled = !exportInProgress }
-            card.addView(exportButton, matchButton(10, 60))
-            card.addView(button(getString(R.string.choose_save_location), false) { chooseReportDestination() }, matchButton(10, 60))
-            val destination = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getString(R.string.reports_save_to_downloads_diplay) else getString(R.string.choose_where_to_save_your_report)
-            card.addView(label(destination + getString(R.string.nothing_is_sent_automatically_protocol_payloads_and_creden), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
             reportIssueInput = EditText(this).apply {
-                hint = getString(R.string.describe_the_problem)
+                hint = getString(R.string.report_description_optional)
                 setText(reportIssueDescription)
                 setTextColor(TEXT)
                 setHintTextColor(MUTED)
@@ -452,23 +451,19 @@ class DiPlayActivity : ComponentActivity() {
                 backgroundTintList = ColorStateList.valueOf(ACCENT)
             }
             card.addView(reportIssueInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
-            reportUploadButton = button(
-                if (reportUploadInProgress) getString(R.string.uploading_to_cloud) else getString(R.string.upload_report_to_cloud),
-                true,
-            ) {
+            exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), true) {
                 val description = reportIssueInput?.text?.toString()?.trim().orEmpty()
-                if (description.isEmpty()) {
-                    toast(getString(R.string.describe_problem_before_uploading))
-                } else if (description.length > GitHubIssueReport.MAX_DESCRIPTION_LENGTH) {
+                if (description.length > GitHubIssueReport.MAX_DESCRIPTION_LENGTH) {
                     toast(getString(R.string.problem_description_too_long))
                 } else {
                     reportIssueDescription = description
-                    prepareFeedbackReport(description)
+                    chooseReportDestination()
                 }
-            }.apply { isEnabled = !reportUploadInProgress }
-            card.addView(reportUploadButton, matchButton(12, 60))
-            card.addView(label(getString(R.string.report_upload_privacy), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
+            }.apply { isEnabled = !exportInProgress }
+            card.addView(exportButton, matchButton(12, 60))
+            card.addView(label(getString(R.string.report_choose_hint), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
         }
+
         section(content, getString(R.string.automatic_connection), R.drawable.ic_dp_automation) { card ->
             toggle(card, getString(R.string.connect_when_diplay_opens), getString(R.string.use_your_last_connection_type_and_selected_iphone), DiPlayPreferences.autoConnect(this)) { DiPlayPreferences.saveAutoConnect(this, it) }
             adbToggle(card, R.string.open_after_the_car_starts,
@@ -596,15 +591,17 @@ class DiPlayActivity : ComponentActivity() {
                     selectedDisplayIndex + 1,
                     reconnects = false,
                 ) { index -> GeelyHudProjection.selectDisplay(this, hudDisplays.getOrNull(index - 1)) }
+                val probeResult = label(getString(R.string.geely_probe_result_hint), 14, MUTED)
                 card.addView(button(getString(R.string.geely_probe), false) {
                     if (!Settings.canDrawOverlays(this)) { openOverlayPermission(); return@button }
                     val choices = hudDisplays.map { "ID ${it.id} · ${it.name} · ${it.width}×${it.height}" }.toTypedArray()
                     AlertDialog.Builder(this).setTitle(getString(R.string.geely_probe_title))
                         .setItems(choices) { _, which ->
                             val shown = SecondaryDisplayProbe.show(this, hudDisplays[which].id)
-                            toast(getString(if (shown) R.string.geely_probe_started else R.string.geely_probe_failed))
+                            probeResult.text = "ID ${hudDisplays[which].id} · " + getString(if (shown) R.string.geely_probe_started else R.string.geely_probe_failed)
                         }.setNegativeButton(getString(R.string.close), null).show()
                 }, matchButton(10, 60))
+                card.addView(probeResult)
                 card.addView(button(getString(R.string.geely_probe_stop), false) { SecondaryDisplayProbe.stop() }, matchButton(8, 56))
                 card.addView(label(getString(R.string.geely_probe_hint), 14, MUTED))
             }
@@ -2208,10 +2205,19 @@ class DiPlayActivity : ComponentActivity() {
     private fun reportFileName() = "DiPlay-${SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())}.txt"
 
     private fun chooseReportDestination() {
-        // Some head units omit or disable DocumentsUI. Launch itself can throw, before
-        // the result callback and the background writer's exception handler ever run.
-        if (exportInProgress) return
-        runCatching { export.launch(reportFileName()) }.onFailure { exportDiagnostics() }
+        if (exportInProgress || exportPickerPending) return
+        pendingExportDescription = reportIssueDescription.takeIf { it.isNotBlank() }
+        exportPickerPending = true
+        runCatching { export.launch(reportFileName()) }.onFailure {
+            exportPickerPending = false
+            val description = pendingExportDescription
+            pendingExportDescription = null
+            // A missing picker is not permission to silently choose a different destination.
+            AlertDialog.Builder(this).setTitle(getString(R.string.report_picker_unavailable))
+                .setMessage(getString(R.string.report_picker_unavailable_hint))
+                .setPositiveButton(getString(R.string.report_save_default)) { _, _ -> exportDiagnostics(description = description) }
+                .setNegativeButton(getString(R.string.close), null).show()
+        }
     }
 
     private fun buildDiagnosticReport(appContext: Context): String = buildString {
@@ -2293,50 +2299,7 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
 
-    private fun prepareFeedbackReport(issueDescription: String) {
-        if (reportUploadInProgress) return
-        reportUploadInProgress = true
-        reportUploadButton?.apply { isEnabled = false; text = getString(R.string.uploading_to_cloud) }
-        val appContext = applicationContext
-        val fileName = reportFileName()
-        Thread({
-            val result = runCatching {
-                val draft = GitHubIssueReport.prepare(fileName, issueDescription, buildDiagnosticReport(appContext))
-                val saved = DiagnosticExportStore.saveWithoutPicker(appContext, fileName, draft.report)
-                draft to saved
-            }
-            runOnUiThread {
-                reportUploadInProgress = false
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                reportUploadButton?.apply { isEnabled = true; text = getString(R.string.upload_report_to_cloud) }
-                result.onSuccess { (draft, saved) ->
-                    AlertDialog.Builder(this)
-                        .setTitle(getString(R.string.github_report_ready))
-                        .setMessage(getString(R.string.github_report_instructions, fileName) + "\n" + getString(if (saved.savedInApp) R.string.diagnostic_report_saved_in_app else R.string.reports_save_to_downloads_diplay))
-                        .setNeutralButton(getString(R.string.github_open_issue)) { _, _ -> openProjectLink(draft.url) }
-                        .setNegativeButton(getString(R.string.view_diagnostic_report)) { _, _ -> showDiagnosticReport(draft.report) }
-                        .setPositiveButton(getString(R.string.share)) { _, _ ->
-                            runCatching {
-                                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_STREAM, saved.uri)
-                                    putExtra(Intent.EXTRA_TEXT, draft.url)
-                                    clipData = android.content.ClipData.newRawUri(getString(R.string.report_clip_label), saved.uri)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }, getString(R.string.share_diagnostic_report)))
-                            }.onFailure { showDiagnosticReport(draft.report) }
-                        }.show()
-                }.onFailure {
-                    AlertDialog.Builder(this).setTitle(getString(R.string.report_upload_failed))
-                        .setMessage(getString(R.string.report_upload_failed_message))
-                        .setPositiveButton(getString(R.string.retry_report_upload)) { _, _ -> prepareFeedbackReport(issueDescription) }
-                        .setNegativeButton(getString(R.string.close), null).show()
-                }
-            }
-        }, "diplay-feedback-report").start()
-    }
-
-    private fun exportDiagnostics(uri: Uri? = null) {
+    private fun exportDiagnostics(uri: Uri? = null, description: String? = null) {
         if (exportInProgress) return
         exportInProgress = true
         exportButton?.apply { isEnabled = false; text = getString(R.string.saving_report) }
@@ -2344,7 +2307,9 @@ class DiPlayActivity : ComponentActivity() {
         val fileName = reportFileName()
         Thread({
             val result = runCatching {
-                val report = buildDiagnosticReport(appContext)
+                val snapshot = buildDiagnosticReport(appContext)
+                val report = if (description.isNullOrBlank()) snapshot
+                    else GitHubIssueReport.prepare(fileName, description, snapshot).report
                 val savedReport = if (uri != null) {
                     DiagnosticExportStore.write(appContext.contentResolver, uri, report)
                     DiagnosticExportStore.SavedReport(uri)

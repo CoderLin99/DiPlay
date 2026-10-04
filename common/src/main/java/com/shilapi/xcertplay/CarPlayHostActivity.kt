@@ -3422,6 +3422,7 @@ class CarPlayHostActivity : ComponentActivity() {
         next.setHudNavigationListener(GeelyHudProjection::update)
         CarPlayMediaKeys.attach(this, next,
             forwardMedia = !airPlayConfig.disableAudioOutput,
+            requireMediaAudio = geelyFactory != null,
             manageAudioFocus = geelyFactory == null && !AirPlayPersistence.loadAudioFocusEnabled(this),
             onMediaPlaying = renderer::onMediaPlaying)
         if (airPlayConfig.videoInCar) CarPlayVideo.attach(this, next)

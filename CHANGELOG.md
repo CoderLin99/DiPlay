@@ -1,5 +1,12 @@
 # Unreleased
 
+## CoderLin99 0.2.11-geely.3 (vehicle verification build)
+
+- On Geely, wait for an actual CarPlay media stream before registering media controls or forwarding media keys. Video-only sessions leave factory Bluetooth controls alone; preserve controls through a pause after CarPlay audio has been established.
+- Merge diagnostics into one save action with an optional problem description. Always open the destination picker, including Android 11; if unavailable, explicitly offer default storage instead of silently changing the destination.
+- Use an Android 11 window context for the temporary display marker, show the request result in settings, and retain bounded timestamped request/attachment/draw/removal records across process restarts. A drawn window still does not prove visibility on the instrument panel; full instrument maps remain unimplemented.
+- Use versionCode 32 and the existing signing key for in-place upgrades.
+
 ## CoderLin99 0.2.11-geely.2 (vehicle verification build)
 
 - Preserve Bluetooth music by default. Factory A2DP handoff is opt-in, requires a phone request and runs at most once per session; it never overrides a later manual reconnection.

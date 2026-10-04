@@ -40,8 +40,13 @@ class DiagnosticExportUiTest {
         ReflectionHelpers.setField(activity, "export", missingPicker)
         try {
             ReflectionHelpers.callInstanceMethod<Unit>(activity, "chooseReportDestination")
+            val fallback = requireNotNull(ShadowAlertDialog.getLatestAlertDialog())
+            assertTrue(descendants(fallback.window!!.decorView).filterIsInstance<TextView>()
+                .any { it.text == activity.getString(R.string.report_picker_unavailable_hint) })
+            assertFalse(ReflectionHelpers.getField<Boolean>(activity, "exportInProgress"))
+            fallback.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
             val deadline = System.nanoTime() + 5_000_000_000L
-            while (ShadowAlertDialog.getLatestAlertDialog() == null && System.nanoTime() < deadline) {
+            while (ShadowAlertDialog.getLatestAlertDialog() === fallback && System.nanoTime() < deadline) {
                 Thread.sleep(20)
                 shadowOf(Looper.getMainLooper()).idle()
             }
@@ -54,6 +59,35 @@ class DiagnosticExportUiTest {
             assertTrue(descendants(viewer.window!!.decorView).filterIsInstance<TextView>()
                 .any { it.isTextSelectable && it.text.contains("Android 9 / API 28") })
             viewer.dismiss()
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test @Config(sdk = [30]) fun theSingleSaveActionOpensThePickerOnAndroidEleven() {
+        val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
+        val activity = controller.get()
+        var launches = 0
+        val picker = object : ActivityResultLauncher<String>() {
+            override fun launch(input: String, options: ActivityOptionsCompat?) {
+                assertTrue(input.endsWith(".txt"))
+                launches++
+            }
+            override fun unregister() = Unit
+            override fun getContract() = androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/plain")
+        }
+        try {
+            ReflectionHelpers.setField(activity, "export", picker)
+            ReflectionHelpers.setField(activity, "page", "settings")
+            ReflectionHelpers.callInstanceMethod<Unit>(activity, "render")
+            val buttons = descendants(activity.window.decorView).filterIsInstance<android.widget.Button>().toList()
+            val save = buttons.single { it.text == activity.getString(R.string.save_diagnostic_report) }
+            assertFalse(buttons.any { it.text == activity.getString(R.string.upload_report_to_cloud) ||
+                it.text == activity.getString(R.string.choose_save_location) })
+            save.performClick()
+            save.performClick()
+            assertEquals(1, launches)
+            assertFalse(ReflectionHelpers.getField<Boolean>(activity, "exportInProgress"))
         } finally {
             controller.pause().stop().destroy()
         }
