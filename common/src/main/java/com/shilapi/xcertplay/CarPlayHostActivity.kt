@@ -3229,10 +3229,11 @@ class CarPlayHostActivity : ComponentActivity() {
 
             override fun onSessionEnded(session: AirPlaySession) {
                 runOnUiThread {
-                    if (activeAirPlaySession === session) activeAirPlaySession = null
+                    if (controllerGeneration != restartGeneration || activeAirPlaySession !== session) return@runOnUiThread
+                    activeAirPlaySession = null
                     CarPlayBackgroundSession.active = false
                     CarPlayMediaKeys.onSessionDisconnected(controller)
-                    if (menuOpen || controllerGeneration != restartGeneration) {
+                    if (menuOpen) {
                         return@runOnUiThread
                     }
                     activeScreenStreamTypes.clear()

@@ -53,4 +53,22 @@ class CarPlayConnectionDiagnosticLogTest {
         assertTrue(AsyncDiagnosticLog.awaitIdle(2_000))
         assertFalse(log.contains("private-token"))
     }
+
+    @Test fun oldSessionEndCannotClearTheNewConnectionsMediaState() {
+        val session = com.shilapi.xcertplay.airplay.AirPlaySession(
+            java.net.Socket(), com.shilapi.xcertplay.airplay.AirPlayConfig("test", "02:00:00:00:00:02",
+                "02:00:00:00:00:01", "1", com.shilapi.xcertplay.airplay.AirPlayDisplayConfig(800, 480)),
+            com.shilapi.xcertplay.airplay.AirPlayIdentity.generate(), com.shilapi.xcertplay.airplay.PairingStore(),
+            null, object : AirPlaySessionListener {}, object : com.shilapi.xcertplay.airplay.AirPlayMediaHandler {},
+        )
+        try {
+            CarPlayBackgroundSession.active = true
+            listener.onSessionEnded(session)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertTrue(CarPlayBackgroundSession.active)
+        } finally {
+            CarPlayBackgroundSession.active = false
+            session.close()
+        }
+    }
 }

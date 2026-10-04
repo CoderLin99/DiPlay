@@ -106,6 +106,10 @@ internal object CarPlayMediaKeys {
         connected = false
         session?.let { it.isActive = false; it.release() }
         session = null
+        focusRequest?.let { appContext?.getSystemService(AudioManager::class.java)?.abandonAudioFocusRequest(it) }
+        focusRequest = null
+        focusHeld = false
+        mediaAudioActive = false
     }
 
     @Synchronized
