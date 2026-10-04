@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class MicrophoneUplink(
     private val config: MicrophoneConfig,
     private val onDiagnostic: (String) -> Unit = {},
+    private val factorySource: Int? = null,
 ) : Closeable {
     private val running = AtomicBoolean(false)
     private val stats = MicrophoneCaptureStats(config, report = { message ->
@@ -76,29 +77,41 @@ internal class MicrophoneUplink(
             return false
         }
         val bufferSize = maxOf(minBuffer * 2, config.frameBytes * 4)
-        val nextRecorder = try {
-            AudioRecord.Builder()
-                .setAudioSource(source)
-                .setAudioFormat(
-                    AndroidAudioFormat.Builder()
+        val nextRecorder = listOfNotNull(factorySource, source).distinct().firstNotNullOfOrNull { candidate ->
+            var record: AudioRecord? = null
+            var stage = MicrophoneFailureStage.RECORDER_CREATION
+            try {
+                val built = AudioRecord.Builder().setAudioSource(candidate)
+                    .setAudioFormat(AndroidAudioFormat.Builder()
                         .setEncoding(AndroidAudioFormat.ENCODING_PCM_16BIT)
                         .setSampleRate(config.sampleRate)
-                        .setChannelMask(channelMask)
-                        .build(),
-                )
-                .setBufferSizeInBytes(bufferSize)
-                .build()
-        } catch (error: Exception) {
-            Log.e(TAG, "microphone recorder creation failed", error)
-            stats.failure(MicrophoneFailureStage.RECORDER_CREATION, error)
-            nextEncoder?.close()
-            running.set(false)
-            return false
+                        .setChannelMask(channelMask).build())
+                    .setBufferSizeInBytes(bufferSize).build()
+                record = built
+                stage = MicrophoneFailureStage.RECORDER_INITIALIZATION
+                if (built.state != AudioRecord.STATE_INITIALIZED) {
+                    stats.failure(stage, code = built.state)
+                    built.release()
+                    null
+                } else {
+                    stage = MicrophoneFailureStage.RECORDING
+                    if (config.audioType == "telephony") effects = voiceEffects(built.audioSessionId)
+                    built.startRecording()
+                    check(built.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Microphone did not start recording" }
+                    built
+                }
+            } catch (error: Exception) {
+                stats.failure(stage, error)
+                val rejectedEffects = effects
+                effects = emptyList()
+                rejectedEffects.forEach(::releaseEffect)
+                runCatching { record?.release() }
+                Log.w(TAG, "microphone source $candidate unavailable", error)
+                null
+            }
         }
-        if (nextRecorder.state != AudioRecord.STATE_INITIALIZED) {
+        if (nextRecorder == null) {
             Log.w(TAG, "microphone recorder failed to initialize")
-            stats.failure(MicrophoneFailureStage.RECORDER_INITIALIZATION, code = nextRecorder.state)
-            nextRecorder.release()
             nextEncoder?.close()
             running.set(false)
             return false
@@ -112,6 +125,9 @@ internal class MicrophoneUplink(
         } catch (error: Exception) {
             Log.e(TAG, "microphone socket creation failed", error)
             stats.failure(MicrophoneFailureStage.SOCKET_CREATION, error)
+            val failedEffects = effects
+            effects = emptyList()
+            failedEffects.forEach(::releaseEffect)
             nextRecorder.release()
             nextEncoder?.close()
             running.set(false)
@@ -122,8 +138,6 @@ internal class MicrophoneUplink(
         socket = nextSocket
         opusEncoder = nextEncoder
         return try {
-            if (config.audioType == "telephony") effects = voiceEffects(nextRecorder.audioSessionId)
-            nextRecorder.startRecording()
             stats.started(routeType(nextRecorder))
             thread = Thread({ capture(nextRecorder, nextSocket) }, "carplay-mic").apply {
                 isDaemon = true

@@ -1,6 +1,8 @@
 # Privacy and diagnostics
 
-DiPlay's product flow uses local authentication and a direct USB/Wi-Fi connection to the iPhone. No account, remote authentication service or automatic diagnostic upload is used. The iPhone's CarPlay apps have their own internet and privacy behavior.
+DiPlay's product flow uses local authentication and a direct USB/Wi-Fi connection to the iPhone. No account or remote authentication service is used. The iPhone's CarPlay apps have their own internet and privacy behavior.
+
+Diagnostic reports are not uploaded automatically. This fork prepares a local redacted file and a browser issue draft in https://github.com/CoderLin99/DiPlay. The user reviews the report, signs in to GitHub, attaches the full file and submits the public issue. The browser draft includes a bounded diagnostic excerpt; opening it is not a successful submission. No third-party intake server or GitHub credential is bundled in the app. Steering mappings remain local unless explicitly exported and shared.
 
 The head unit stores app preferences, paired-device selections, pairing data and bounded diagnostic logs in app storage. Authentication and pairing material are kept out of Android backup. Uninstalling removes app-private data; exported reports in Downloads remain until you delete them.
 

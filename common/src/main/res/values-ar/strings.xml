@@ -534,7 +534,25 @@
     <string name="hotspot_control_failed">تعذر تشغيل نقطة الاتصال. افتح إعدادات السيارة لتشغيلها.</string>
     <string name="byd_adb_features">ميزات BYD · تتطلب ADB</string>
     <string name="location_reporting_reconnects">يؤدي تغيير هذا الإعداد إلى إعادة اتصال جلسة CarPlay النشطة.</string>
+    <string name="return_home_icon">أيقونة العودة إلى شاشة السيارة</string>
+    <string name="return_home_icon_description">اختر صورة مربعة لزر CarPlay الذي يعيدك إلى شاشة السيارة. ستظهر الأيقونة الجديدة عند الاتصال التالي.</string>
+    <string name="describe_the_problem">صِف المشكلة ووقت حدوثها والنتيجة المتوقعة</string>
+    <string name="upload_report_to_cloud">Prepare GitHub bug report</string>
+    <string name="uploading_to_cloud">Preparing report…</string>
+    <string name="describe_problem_before_uploading">صِف المشكلة قبل الرفع.</string>
+    <string name="problem_description_too_long">يجب ألا يتجاوز الوصف 2000 حرف.</string>
+    <string name="report_upload_privacy">Saves a redacted report locally. Open CoderLin99/DiPlay on GitHub, review the draft, attach the report and submit. Issues are public; nothing uploads automatically.</string>
+    <string name="report_uploaded">تم رفع التقرير</string>
+    <string name="report_uploaded_message">استلمت السحابة وصف المشكلة وتقرير التشخيص.</string>
+    <string name="report_upload_failed">Could not prepare the report</string>
+    <string name="report_upload_failed_message">Could not save the local report. Try Save diagnostic report instead.</string>
+    <string name="retry_report_upload">إعادة المحاولة</string>
+    <string name="report_too_large_message">حجم التقرير أكبر من 1 MiB. احفظه محليًا وشاركه يدويًا.</string>
     <string name="diagnostic_report_saved_in_app">تم حفظ التقرير بشكل خاص داخل DiPlay لعدم توفر موقع حفظ عام. يمكنك مشاركته أو عرضه هنا. لا يتم إرسال شيء تلقائياً.</string>
     <string name="view_diagnostic_report">عرض التقرير</string>
     <string name="diagnostic_report_copy_hint">المس نص التقرير مطولاً لتحديده ونسخه. يمكنك استخدام ذلك إذا لم يتوفر تطبيق للمشاركة.</string>
+    <string name="github_report_ready">Report ready — not submitted</string>
+    <string name="github_report_instructions">Report: %1$s\nOpen GitHub and sign in, review the prefilled summary, attach the full report and submit. You can share the report and issue link to your phone first. The app cannot confirm submission.</string>
+    <string name="github_open_issue">Open GitHub issue</string>
+    <string name="github_fork_source">Open CoderLin99 fork</string>
 </resources>

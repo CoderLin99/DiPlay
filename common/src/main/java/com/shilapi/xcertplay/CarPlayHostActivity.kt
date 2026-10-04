@@ -8,11 +8,13 @@ import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.MediaCodec
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
@@ -85,6 +87,8 @@ import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
 import com.shilapi.xcertplay.transport.UsbDeviceId
 import com.shilapi.xcertplay.transport.VehicleSpeedLocationProvider
+import com.shilapi.xcertplay.vehicle.GeelyFactoryCarPlay
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
@@ -102,6 +106,23 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Apple devices are discovered by vendor ID; CH341 uses the configured VID/PID below.
  */
 class CarPlayHostActivity : ComponentActivity() {
+    private val geelyFactory by lazy { GeelyFactoryCarPlay.load(applicationContext) }
+    private val factoryCarIcons by lazy { geelyFactory?.icons().orEmpty() }
+    private fun supportsOpusOutput(): Boolean {
+        if (!wirelessEnabled) {
+            appendLog("Audio Opus not advertised for wired CarPlay; requesting PCM audio")
+            return false
+        }
+        val decoder = try {
+            MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
+        } catch (error: Exception) {
+            appendLog("Audio Opus decoder unavailable; requesting PCM guidance (${error.javaClass.simpleName})")
+            return false
+        }
+        runCatching { decoder.release() }
+        return true
+    }
+    private data class CarIconSelection(val icons: List<AirPlayIcon>, val statusRes: Int)
     private data class SettingsBaseline(
         val safeAreaSize: DisplaySize?,
         val safeAreaRect: SafeAreaRect?,
@@ -652,6 +673,8 @@ class CarPlayHostActivity : ComponentActivity() {
             clusterMonitor?.stop()
             clusterMonitor = null
         }
+        GeelyHudProjection.attach(this)
+        controller?.setHudNavigationListener(GeelyHudProjection::update)
         gestureFingerCount = AirPlayPersistence.loadSettingsGestureFingers(this)
         settingsGestureHint?.text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
         ensureClusterPresentation()
@@ -823,6 +846,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
         // Keep DiPlay's existing steering-wheel/voice-key Siri handling intact.
+        if (CarPlayMediaKeys.consumesHardwareKey(event.keyCode)) return true
         if (!CarPlayMediaButton.opensSiri(event.keyCode)) return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_UP) {
             val sent = controller?.requestSiri() == true
@@ -921,6 +945,8 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         if (MapMirrors.onChanged === mirrorsChanged) MapMirrors.onChanged = null
         dismissClusterPresentation()
+        controller?.setHudNavigationListener(null)
+        GeelyHudProjection.detach(this)
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.removeCallbacks(expireOldLogLines)
         mainHandler.removeCallbacks(pollConfiguration)
@@ -2968,58 +2994,72 @@ class CarPlayHostActivity : ComponentActivity() {
             cluster = clusterDisplayConfig(),
             rightHandDrive = rightHandDrive,
             hevc = hevcEnabled,
+            opusOutputSupported = supportsOpusOutput(),
             microphone = microphoneAvailable,
             manufacturer = normalizedManufacturer(),
             model = normalizedModel(),
             oemLabel = oemLabel,
-            icons = listOf(loadAirPlayIcon()),
+            icons = loadAirPlayIcons().icons,
             videoInCar = com.shilapi.xcertplay.hud.BydOutputSettings.videoWhileParkedActive(this),
         )
     }
 
-    private fun loadAirPlayIcon(): AirPlayIcon {
+    private fun loadAirPlayIcons(): CarIconSelection {
         val customBytes = try {
             AirPlayPersistence.loadCustomAirPlayIconFile(this)?.readBytes()
         } catch (_: Exception) {
             null
         }
         if (customBytes != null) {
-            decodeAirPlayIcon(customBytes)?.let { return it }
+            decodeAirPlayIcon(customBytes)?.let { return CarIconSelection(listOf(it), R.string.custom_1_1_icon) }
             AirPlayPersistence.clearCustomAirPlayIcon(this)
         }
-        return decodeAirPlayIcon(defaultAirPlayIconBytes())
-            ?: throw IllegalStateException("Packaged AirPlay icon is invalid")
+        if (factoryCarIcons.isNotEmpty()) return CarIconSelection(factoryCarIcons, R.string.factory_car_icon)
+        return CarIconSelection(listOf(decodeAirPlayIcon(defaultAirPlayIconBytes())
+            ?: throw IllegalStateException("Packaged AirPlay icon is invalid")), R.string.default_placeholder_icon)
     }
 
     private fun decodeAirPlayIcon(encoded: ByteArray): AirPlayIcon? {
+        val pngSignature = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+        )
+        if (encoded.size < pngSignature.size ||
+            !encoded.copyOfRange(0, pngSignature.size).contentEquals(pngSignature)
+        ) {
+            return null
+        }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(encoded, 0, encoded.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0 ||
-            bounds.outWidth != bounds.outHeight
+            bounds.outWidth != bounds.outHeight || bounds.outWidth > 1024
         ) {
             return null
         }
         return AirPlayIcon(bounds.outWidth, bounds.outHeight, encoded)
     }
 
-    private fun defaultAirPlayIconBytes(): ByteArray =
-        // Shown in CarPlay's app list as the "back to the car" button.
-        resources.openRawResource(R.raw.ic_car_home).use { it.readBytes() }
+    private fun defaultAirPlayIconBytes(): ByteArray {
+        factoryCarIcons.lastOrNull()?.let { return it.data }
+        if (geelyFactory == null) return resources.openRawResource(R.raw.ic_car_home).use { it.readBytes() }
+        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        return try {
+            resources.getDrawable(R.drawable.ic_car_home_fallback, theme).apply {
+                setBounds(0, 0, 256, 256)
+                draw(Canvas(bitmap))
+            }
+            ByteArrayOutputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+                output.toByteArray()
+            }
+        } finally { bitmap.recycle() }
+    }
 
     private fun updateAirPlayIconPreview() {
         val preview = iconPreviewView ?: return
-        val custom = AirPlayPersistence.loadCustomAirPlayIconFile(this)
-        var customBitmap: Bitmap? = null
-        if (custom != null) {
-            customBitmap = BitmapFactory.decodeFile(custom.absolutePath)
-            if (customBitmap == null) {
-                AirPlayPersistence.clearCustomAirPlayIcon(this)
-            }
-        }
-        val bitmap = customBitmap ?: BitmapFactory.decodeResource(resources, R.raw.placeholder_icon)
-        preview.setImageBitmap(bitmap)
-        iconStatusView?.text =
-            if (customBitmap != null) getString(R.string.custom_1_1_icon) else getString(R.string.default_placeholder_icon)
+        val selected = loadAirPlayIcons()
+        val icon = selected.icons.last()
+        preview.setImageBitmap(BitmapFactory.decodeByteArray(icon.data, 0, icon.data.size))
+        iconStatusView?.text = getString(selected.statusRes)
     }
 
     private fun currentActivitySize(): DisplaySize? {
@@ -3155,6 +3195,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 }
             },
             onMediaAudioChanged = CarPlayMediaKeys::onMediaAudioChanged,
+            wirelessAudio = wirelessEnabled,
         )
     }
 
@@ -3373,7 +3414,10 @@ class CarPlayHostActivity : ComponentActivity() {
             },
         )
         controller = next
-        CarPlayMediaKeys.attach(this, next)
+        next.setHudNavigationListener(GeelyHudProjection::update)
+        CarPlayMediaKeys.attach(this, next,
+            manageAudioFocus = geelyFactory == null && !AirPlayPersistence.loadAudioFocusEnabled(this),
+            onMediaPlaying = renderer::onMediaPlaying)
         if (airPlayConfig.videoInCar) CarPlayVideo.attach(this, next)
         val display = CarPlaySessionDisplay(airPlayConfig.main.widthPixels, airPlayConfig.main.heightPixels,
             displayRotation(), hideTopBar, hideBottomBar, size.width, size.height)
@@ -3922,9 +3966,25 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun applyFullscreenMode() {
         val hideTop = hideTopBar
         val hideBottom = hideBottomBar
+        var legacyFlags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        if (hideTop) {
+            legacyFlags = legacyFlags or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+        }
+        if (hideBottom) {
+            legacyFlags = legacyFlags or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+        }
+        if (hideTop || hideBottom) {
+            legacyFlags = legacyFlags or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        }
+        window.decorView.systemUiVisibility = legacyFlags
         WindowCompat.setDecorFitsSystemWindows(window, !(hideTop && hideBottom))
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         if (hideTop) {

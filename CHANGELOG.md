@@ -1,9 +1,17 @@
 # Unreleased
 
 - Save diagnostic reports privately in DiPlay when the head unit has no document picker or working Downloads provider, with explicit Share and selectable View report actions. This unblocks collecting logs for #135; its CarPlay startup failure still needs a device report.
+- Restore wireless CarPlay sound on KX11 head units while keeping the proven wired audio path.
+- Recognize the hotspot interface used by Android 9 KX11 head units so wireless CarPlay can leave the preparation screen.
+- Leave direct steering-button compatibility off by default on Android 9 KX11 head units to avoid playback-control conflicts; it remains available in settings.
 
 # DiPlay 0.2.11 — 2026-10-03
 
+- Fix wireless CarPlay remaining on the starting screen on more legacy Geely head units.
+- Restore calls, Siri and guidance on KX11 head units, and fix silent guidance on some other head units.
+- Keep music smooth while navigation guidance is speaking, and add factory audio routing for Galaxy E5 head units.
+- Enable direct OneOS steering controls by default on G636, FX11 and KX11 head units, and let button identification use OneOS without log access or a local ADB connection.
+- Let users choose any active secondary display for Geely HUD projection, remember the selected screen, and include HUD screen status in user-submitted diagnostic reports. See [fork update notes](docs/UPDATE-NOTES-0.2.11.md).
 - Add preferred Wi-Fi Direct channel selection for the next connection; Auto remains the default, and manual channel rejection/mismatch reports an error (#175).
 - Add a movable custom dashboard turn card with 2% position steps; leave unknown arrows blank and clear expired guidance (#155).
 - Offer two-, three- or four-finger settings swipes, keeping three as the default (#156).
@@ -19,6 +27,10 @@ See [0.2.11 release notes](docs/RELEASE-NOTES-0.2.11.md) for requirements, devic
 
 # DiPlay 0.2.10 — 2026-10-03
 
+- Add a main-settings editor for the CarPlay return-to-home icon and an explicit diagnostic-report upload with a required user problem description.
+- Route Geely factory guidance through navigation channel 14 by default when the user has not chosen another channel.
+- Release the active phone's factory Bluetooth music channel on any head unit when wireless CarPlay requests its handoff, recognize Geely KX11 units for their factory integration, and reinforce immersive full-screen recovery on Android 11 vendor firmware.
+- Merge upstream 0.2.10 / code 29 while retaining Geely factory artwork, audio and Bluetooth handling, HUD display limits and independently learned steering controls. See [fork update notes](docs/UPDATE-NOTES-0.2.10.md).
 - Publish CarPlay song metadata, position and artwork to Android media sessions; bound artwork queues and reject stale work across sessions (#82).
 - Preserve normal USBMUX frames while handling narrowly validated handshake padding (#114); let USB connect without saved wireless-hotspot credentials (#130).
 - Handle unknown reported Wi-Fi Direct security types, retry busy channels and allow bounded 5 GHz fallback (#121).
@@ -33,6 +45,23 @@ See [0.2.11 release notes](docs/RELEASE-NOTES-0.2.11.md) for requirements, devic
 See [0.2.10 release notes](docs/RELEASE-NOTES-0.2.10.md) for contributor credits, requirements and validation limits. Android 9 remains the minimum supported version.
 
 # DiPlay 0.2.9 — 2026-10-02
+
+## Update — 2026-10-03
+
+- Adapt the CarPlay return-to-home icon for Geely head units, using factory artwork when available and a house icon otherwise.
+- Improve Geely music, navigation, Siri and call audio switching, including Bluetooth music handoff for the active phone.
+- Recognize factory voice-button press/release information and limit transparent HUD guidance to an available HUD display, clearing expired instructions.
+
+G636 / FX11 vehicle compatibility still needs verification with an iPhone. Version remains 0.2.9.
+
+- Add steering button identification in Settings, with assignments for play/pause, next track, previous track and Siri.
+- Fill identified buttons automatically and apply the mapping when saved.
+- Save settings by vehicle and head unit model and upload them to the cloud, resuming uploads when internet access returns.
+- Export saved settings or restore the original controls while retaining the saved configuration.
+
+Button identification requires the head unit to allow button access. Compatibility with individual vehicles still needs physical verification. See [update notes](docs/UPDATE-NOTES-0.2.9.md).
+
+## Original 0.2.9 changes
 
 - Follow BYD head-unit day/night changes while CarPlay is visible, including firmware that does not reliably deliver Android configuration callbacks.
 - Restore media and navigation audio stream selection to 0–20 and inherit older saved navigation settings when no new selection exists. Vendor-specific outputs depend on head-unit support.

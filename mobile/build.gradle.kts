@@ -18,7 +18,7 @@ android {
         minSdk = 28
         targetSdk = 37
         versionCode = 30
-        versionName = "0.2.11"
+        versionName = "0.2.11-geely.1"
 
     }
 

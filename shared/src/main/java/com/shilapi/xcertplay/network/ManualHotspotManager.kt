@@ -107,6 +107,7 @@ class ManualHotspotManager(
                 onDiagnostic("Manual hotspot configReadable=${apConfiguration != null} " +
                     "security=$security channelKnown=${channel > 0} " +
                     "hardwareAddressKnown=${localInterface.hardwareAddress != null} iface=${localInterface.name} " +
+                    "tethered=${localInterface.tethered} " +
                     "family=${if (localInterface.hostAddress is Inet6Address) "IPv6" else "IPv4"}")
                 if (security != Iap2WirelessSecurity.NONE && passphrase.isEmpty()) {
                     throw IOException("Manual hotspot is secured but no passphrase was provided")
@@ -206,9 +207,10 @@ class ManualHotspotManager(
         } ?: return null
         val primaryInterface = connectivityManager?.activeNetwork
             ?.let { connectivityManager.getLinkProperties(it)?.interfaceName }
+        val tetheredInterfaces = tetheredInterfaceNames()
         return Collections.list(interfaces)
             .asSequence()
-            .filter { isUsableInterface(it, primaryInterface) }
+            .filter { isUsableInterface(it, primaryInterface, tetheredInterfaces) }
             .mapNotNull { networkInterface ->
                 networkInterface.hotspotAddress()?.let { address ->
                     LocalHotspotInterface(
@@ -217,7 +219,9 @@ class ManualHotspotManager(
                         hardwareAddress = runCatching { networkInterface.hardwareAddress?.toMacAddressString() }
                             .getOrNull()?.takeUnless { it == "02:00:00:00:00:00" || it == "00:00:00:00:00:00" }
                             ?: HotspotInterfaceBssid.read(networkInterface.name),
-                        score = interfaceScore(networkInterface.name, address),
+                        tethered = networkInterface.name in tetheredInterfaces,
+                        score = interfaceScore(networkInterface.name, address) +
+                            if (networkInterface.name in tetheredInterfaces) 1_000 else 0,
                     )
                 }
             }
@@ -227,8 +231,9 @@ class ManualHotspotManager(
     private fun isUsableInterface(
         networkInterface: NetworkInterface,
         primaryInterface: String?,
+        tetheredInterfaces: Set<String>,
     ): Boolean = try {
-        networkInterface.name != primaryInterface &&
+        (networkInterface.name != primaryInterface || networkInterface.name in tetheredInterfaces) &&
             !networkInterface.isLoopback &&
             networkInterface.isUp &&
             EXCLUDED_INTERFACE_PREFIXES.none { networkInterface.name.startsWith(it) }
@@ -236,9 +241,20 @@ class ManualHotspotManager(
         false
     }
 
+    @SuppressLint("PrivateApi")
+    private fun tetheredInterfaceNames(): Set<String> {
+        val manager = connectivityManager ?: return emptySet()
+        return runCatching {
+            val method = ConnectivityManager::class.java.getDeclaredMethod("getTetheredIfaces")
+            method.isAccessible = true
+            (method.invoke(manager) as? Array<*>)?.filterIsInstance<String>()?.toSet().orEmpty()
+        }.getOrDefault(emptySet())
+    }
+
     private fun interfaceScore(name: String, address: InetAddress): Int {
         var score = when {
             name.startsWith("ap") || name.contains("softap", ignoreCase = true) -> 100
+            name.startsWith("vt") -> 90
             name.startsWith("p2p") -> 80
             name.startsWith("wlan") -> 70
             else -> 0
@@ -254,8 +270,13 @@ class ManualHotspotManager(
         return score
     }
 
-    private fun NetworkInterface.hotspotAddress(): InetAddress? =
-        wirelessHostAddress(Collections.list(inetAddresses), index)
+    private fun NetworkInterface.hotspotAddress(): InetAddress? {
+        val addresses = Collections.list(inetAddresses)
+        return addresses.firstOrNull {
+            it is Inet4Address && !it.isLoopbackAddress && !it.isLinkLocalAddress &&
+                !it.isAnyLocalAddress && !it.isMulticastAddress
+        } ?: wirelessHostAddress(addresses, index)
+    }
 
     private fun frequencyFromConnectionInfo(): Int? {
         val connectionInfo = try {
@@ -427,6 +448,7 @@ class ManualHotspotManager(
         val name: String,
         val hostAddress: InetAddress,
         val hardwareAddress: String?,
+        val tethered: Boolean,
         val score: Int,
     )
 

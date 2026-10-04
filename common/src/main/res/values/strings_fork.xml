@@ -1,0 +1,10 @@
+<resources>
+    <string name="connection_notification_channel">CarPlay connection</string>
+    <string name="connection_notification_running">CarPlay connection running</string>
+    <string name="connection_notification_disconnect">Disconnect</string>
+    <string name="ui_project_source">Project source</string>
+    <string name="ui_carlito_modification_credit">This version was modified by carlito and is based on the upstream DiPlay project.</string>
+    <string name="ui_open_upstream_source">Open upstream source</string>
+    <string name="ui_open_carlito_fork">Open carlito fork source</string>
+    <string name="ui_project_link_failed">Could not open the project link</string>
+</resources>

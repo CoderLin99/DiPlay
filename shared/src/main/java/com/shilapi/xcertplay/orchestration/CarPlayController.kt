@@ -33,6 +33,9 @@ import com.shilapi.xcertplay.airplay.PairingStore
 import com.shilapi.xcertplay.airplay.VideoInCar
 import com.shilapi.xcertplay.airplay.VideoPlaybackDelivery
 import com.shilapi.xcertplay.hud.BydNavigationOutputs
+import com.shilapi.xcertplay.hud.BydHudRouteChange
+import com.shilapi.xcertplay.hud.BydHudRouteState
+import com.shilapi.xcertplay.hud.CarPlayHudGuidance
 import com.shilapi.xcertplay.iap2.session.Iap2Session
 import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.MfiAuthenticationClient
@@ -166,6 +169,10 @@ class CarPlayController(
     private enum class Phase { IDLE, MFI, WIRELESS, IPHONE, REENUMERATION, DATAPATHS, CONTROL }
 
     private val appContext = context.applicationContext
+    private val geelyFactory = com.shilapi.xcertplay.vehicle.GeelyFactoryCarPlay.load(appContext)
+    private var factoryBluetoothGuard: com.shilapi.xcertplay.vehicle.GeelyBluetoothAudioGuard? = null
+    private var factoryBluetoothSession: AirPlaySession? = null
+    @Volatile private var wirelessPeerBluetoothAddress: String? = null
     private val diagnosticAttempt = diagnosticAttempts.incrementAndGet()
     private val diagnosticRun = AtomicInteger()
     private val usbManager = context.getSystemService(UsbManager::class.java)
@@ -207,9 +214,12 @@ class CarPlayController(
     private var clusterUiStream: Pair<AirPlaySession, Int>? = null
     private var clusterUiShown = true
     private val playbackStatus = com.shilapi.xcertplay.media.CarPlayPlaybackStatus()
+    private val hudRouteLock = Any()
+    private val hudRouteState = BydHudRouteState()
 
     /** Told when the iPhone starts or stops playing media; may run on any thread. */
     @Volatile var playbackListener: ((Boolean) -> Unit)? = null
+    @Volatile private var hudNavigationListener: ((CarPlayHudGuidance?) -> Unit)? = null
 
     /** Told when retained iPhone now-playing metadata changes; may run on any thread. */
     @Volatile var nowPlayingListener: ((com.shilapi.xcertplay.media.CarPlayNowPlaying) -> Unit)? = null
@@ -271,6 +281,9 @@ class CarPlayController(
                 }
             }
             activeSession = session
+            if (geelyFactory != null) {
+                wirelessPeerBluetoothAddress?.let { configureBluetoothAudioHandoff(session, it) }
+            }
             debugLog(
                 "AirPlay session active controller=${session.controllerId ?: "unknown"} " +
                     "peer=${session.host}",
@@ -279,9 +292,17 @@ class CarPlayController(
         }
 
         override fun onSessionEnded(session: AirPlaySession) {
+            mainHandler.post {
+                if (factoryBluetoothSession === session) {
+                    factoryBluetoothGuard?.close()
+                    factoryBluetoothGuard = null
+                    factoryBluetoothSession = null
+                }
+            }
             if (activeSession === session) {
                 activeSession = null
                 BydNavigationOutputs.endNow()
+                clearHudGuidance()
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
                 videoListener?.onVideoSessionEnded()
                 synchronized(playbackStatus) {
@@ -312,6 +333,7 @@ class CarPlayController(
         // The user tapped the car icon in CarPlay: show the head unit's own menu, like its Home button.
         // The session keeps running in the background, so returning to DiPlay resumes CarPlay.
         override fun onHostUiRequested(session: AirPlaySession) {
+            if (closed || activeSession !== session) return
             debugLog("CarPlay requested the car UI; opening the head-unit home screen")
             runCatching {
                 appContext.startActivity(
@@ -332,6 +354,17 @@ class CarPlayController(
         }
 
         override fun onCommand(session: AirPlaySession, type: String, params: Map<String, Any?>) {
+            if (activeSession === session && isBluetoothHandoffCommand(type)) {
+                val requestedAddress = (params["deviceID"] as? String)
+                    ?.takeIf { BluetoothAdapter.checkBluetoothAddress(it.uppercase(Locale.US)) }
+                val connectedAddress = wirelessPeerBluetoothAddress
+                val address = when {
+                    requestedAddress == null -> connectedAddress
+                    connectedAddress == null || requestedAddress.equals(connectedAddress, true) -> requestedAddress
+                    else -> null
+                }
+                address?.let { configureBluetoothAudioHandoff(session, it) }
+            }
             debugLog(
                 "AirPlay command type=$type params=${params.keys.sorted().joinToString(",")}",
             )
@@ -466,10 +499,28 @@ class CarPlayController(
         }
     }
 
+    /** Delivers the current next-turn prompt to the active vehicle display, including after reattach. */
+    fun setHudNavigationListener(listener: ((CarPlayHudGuidance?) -> Unit)?) {
+        hudNavigationListener = listener
+        val current = synchronized(hudRouteLock) {
+            hudRouteState.current()?.let {
+                CarPlayHudGuidance(it.distanceMeters, it.maneuver, it.road)
+            }
+        }
+        mainHandler.post {
+            if (hudNavigationListener === listener) listener?.invoke(current)
+        }
+    }
+
     override fun close() {
         synchronized(this) {
             if (closed) return
             closed = true
+        }
+        mainHandler.post {
+            factoryBluetoothGuard?.close()
+            factoryBluetoothGuard = null
+            factoryBluetoothSession = null
         }
         val teardownStarted = System.nanoTime()
         connectionDiagnostic("teardown begin transport=${config.transport}")
@@ -477,6 +528,7 @@ class CarPlayController(
         BydNavigationOutputs.endNow()
         com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
         BydNavigationOutputs.clearClusterStreamControl(::applyClusterUi)
+        clearHudGuidance()
         closeReceivers()
         availabilityPollGeneration.incrementAndGet()
         wirelessGeneration.incrementAndGet()
@@ -552,9 +604,20 @@ class CarPlayController(
         }
     }
 
-    // HUD (SOME/IP) and cluster (AMap broadcast) keep separate state so one failing cannot stall the other.
+    // BYD output and the in-app secondary-display HUD keep independent state so one failure cannot stall the other.
     private fun onRouteFrame(frame: com.shilapi.xcertplay.iap2.wire.Iap2Frame) {
         BydNavigationOutputs.onFrame(frame)
+        var changed = false
+        val guidance = synchronized(hudRouteLock) {
+            val update = hudRouteState.accept(frame.messageId, frame.payload)
+            changed = update != BydHudRouteChange.NONE
+            hudRouteState.current()?.let {
+                CarPlayHudGuidance(it.distanceMeters, it.maneuver, it.road)
+            }
+        }
+        if (changed) {
+            mainHandler.post { hudNavigationListener?.invoke(guidance) }
+        }
         com.shilapi.xcertplay.glance.CarPlayGlance.onFrame(frame)
         synchronized(playbackStatus) {
             val previousPlaying = playbackStatus.playing
@@ -568,6 +631,11 @@ class CarPlayController(
     private fun onArtworkTransfer(transfer: com.shilapi.xcertplay.transport.Iap2ArtworkTransfer) {
         debugLog("iap2 artwork transfer id=0x${transfer.id.toString(16)} bytes=${transfer.bytes.size}")
         artworkListener?.invoke(transfer.id, transfer.bytes)
+    }
+
+    private fun clearHudGuidance() {
+        synchronized(hudRouteLock) { hudRouteState.clear() }
+        mainHandler.post { hudNavigationListener?.invoke(null) }
     }
 
     private fun startMfi() {
@@ -1081,6 +1149,7 @@ class CarPlayController(
             val bluetoothStarted = System.nanoTime()
             try {
                 connectBluetoothSocket(socket, device.address)
+                wirelessPeerBluetoothAddress = device.address
                 connectionDiagnostic("Bluetooth connect completed elapsedMs=${elapsedMillis(bluetoothStarted)}")
             } catch (error: Throwable) {
                 connectionDiagnostic(
@@ -1809,7 +1878,8 @@ class CarPlayController(
 
     private fun isBluetoothHandoffCommand(type: String): Boolean =
         type.equals("disableBluetooth", ignoreCase = true) ||
-            type.equals("disable-bluetooth", ignoreCase = true)
+            type.equals("disable-bluetooth", ignoreCase = true) ||
+            type.equals("disconnectBT", ignoreCase = true)
 
     private fun startWirelessHotspot(generation: Int): WirelessHotspotInfo {
         val hotspotMode = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
@@ -1985,6 +2055,7 @@ class CarPlayController(
     }
 
     private fun closeWirelessStack(service: CarPlayVpnService? = vpnService) {
+        wirelessPeerBluetoothAddress = null
         val diagnostics = wirelessDiagnostics
         wirelessDiagnostics = null
         diagnostics?.close()
@@ -2026,7 +2097,24 @@ class CarPlayController(
         buildSet {
             addAll(connectedBluetoothDevices(adapter, BluetoothProfile.HEADSET, BluetoothHeadset::class.java))
             addAll(connectedBluetoothDevices(adapter, BluetoothProfile.A2DP, BluetoothA2dp::class.java))
+            if (geelyFactory != null) {
+                // Android Automotive uses sink/client roles rather than phone source roles.
+                addAll(connectedBluetoothDevices(adapter, 11, BluetoothProfile::class.java))
+                addAll(connectedBluetoothDevices(adapter, 16, BluetoothProfile::class.java))
+            }
         }
+
+    private fun configureBluetoothAudioHandoff(session: AirPlaySession, address: String) {
+        if (!BluetoothAdapter.checkBluetoothAddress(address.uppercase(Locale.US))) return
+        mainHandler.post {
+            if (closed || activeSession !== session || factoryBluetoothSession === session) return@post
+            val bonded = runCatching { bluetoothAdapter?.bondedDevices?.any { it.address.equals(address, true) } == true }.getOrDefault(false)
+            if (!bonded) return@post
+            factoryBluetoothGuard?.close()
+            factoryBluetoothSession = session
+            factoryBluetoothGuard = com.shilapi.xcertplay.vehicle.GeelyBluetoothAudioGuard(appContext, address, ::debugLog).also { it.start() }
+        }
+    }
 
     private fun <T : BluetoothProfile> connectedBluetoothDevices(
         adapter: BluetoothAdapter,

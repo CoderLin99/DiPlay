@@ -21,6 +21,7 @@ import com.shilapi.xcertplay.airplay.MediaSink
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.toHexString
+import com.shilapi.xcertplay.vehicle.GeelyFactoryCarPlay
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
@@ -35,11 +36,12 @@ import java.util.concurrent.TimeUnit
 internal fun audioTrackAttributesForFocus(track: AudioTrack, configured: AudioAttributes): AudioAttributes =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) track.audioAttributes else configured
 
-/** Owns one focus request for all eligible tracks in a CarPlay sink. */
+/** Owns one focus request for all eligible tracks; calls and Siri take priority over media. */
 internal class AudioFocusCoordinator(
     context: Context?,
     private val enabled: Boolean,
     private val report: (String) -> Unit = {},
+    private val factoryRouting: Boolean = false,
 ) {
     private data class Entry(val channel: AudioChannel, val attributes: AudioAttributes)
 
@@ -47,22 +49,35 @@ internal class AudioFocusCoordinator(
     private val active = LinkedHashMap<AudioTrack, Entry>()
     private var request: AudioFocusRequest? = null
     private var requestedChannel: AudioChannel? = null
-    private val listener = AudioManager.OnAudioFocusChangeListener { change ->
+    private var requestGeneration = 0
+    private var focusHeld = false
+    private var focusVolume = FULL_VOLUME
+    private var mediaAttributes: AudioAttributes? = null
+    private var mediaSuppressed = false
+    private var closed = false
+
+    private fun onFocusChanged(generation: Int, change: Int) {
         synchronized(this) {
+            if (closed || generation != requestGeneration) return
             runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
             when (change) {
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> setVolume(DUCKED_VOLUME)
-                AudioManager.AUDIOFOCUS_GAIN -> setVolume(FULL_VOLUME)
-                // Keep CarPlay audio running on permanent or transient loss. Some head units
-                // do not send a later gain callback after taking focus back.
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> focusVolume = DUCKED_VOLUME
+                AudioManager.AUDIOFOCUS_GAIN -> { focusHeld = true; focusVolume = FULL_VOLUME }
+                AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    focusHeld = false
+                    if (factoryRouting) focusVolume = 0f
+                    if (factoryRouting && change == AudioManager.AUDIOFOCUS_LOSS) mediaSuppressed = true
+                }
             }
+            applyVolumes()
         }
     }
 
     @Synchronized
     fun acquire(track: AudioTrack, channel: AudioChannel, attributes: AudioAttributes) {
-        if (!enabled || manager == null || channel == AudioChannel.NAVIGATION) return
+        if (closed || !enabled || manager == null || (channel == AudioChannel.NAVIGATION && !factoryRouting)) return
         active[track] = Entry(channel, attributes)
+        if (channel == AudioChannel.MEDIA) mediaAttributes = attributes
         refreshRequest()
     }
 
@@ -71,43 +86,95 @@ internal class AudioFocusCoordinator(
         if (active.remove(track) != null) refreshRequest()
     }
 
+    @Synchronized
+    fun onMediaPlaying(playing: Boolean) {
+        if (!playing || closed) return
+        mediaSuppressed = false
+        refreshRequest()
+        if (!focusHeld && requestedChannel == AudioChannel.MEDIA) requestCurrentFocus()
+    }
+
+    @Synchronized
+    fun close() {
+        closed = true
+        requestGeneration++
+        active.clear()
+        mediaAttributes = null
+        request?.let { manager?.abandonAudioFocusRequest(it) }
+        request = null
+        requestedChannel = null
+        focusHeld = false
+    }
+
     private fun refreshRequest() {
-        val primary = active.values.maxByOrNull { it.channel.focusPriority() }
+        val primary = active.values.filter { it.channel != AudioChannel.NAVIGATION }
+            .maxByOrNull { it.channel.focusPriority() }
+            ?: mediaAttributes?.takeIf { !mediaSuppressed }?.let { Entry(AudioChannel.MEDIA, it) }
+            ?: active.values.firstOrNull { it.channel == AudioChannel.NAVIGATION }
         if (primary == null) {
+            requestGeneration++
             request?.let { manager?.abandonAudioFocusRequest(it) }
             request = null
             requestedChannel = null
+            focusHeld = false
+            focusVolume = FULL_VOLUME
             return
         }
-        if (request != null && requestedChannel == primary.channel) return
+        if (request != null && requestedChannel == primary.channel) { applyVolumes(); return }
+        val generation = ++requestGeneration
         request?.let { manager?.abandonAudioFocusRequest(it) }
         val gain = when (primary.channel) {
             AudioChannel.MEDIA -> AudioManager.AUDIOFOCUS_GAIN
             AudioChannel.PHONE -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
-            AudioChannel.ASSISTANT -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
-            AudioChannel.NAVIGATION -> return
+            AudioChannel.ASSISTANT -> if (factoryRouting) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+            AudioChannel.NAVIGATION -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+            AudioChannel.RINGTONE -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
         }
         val next = AudioFocusRequest.Builder(gain)
             .setAudioAttributes(primary.attributes)
-            .setOnAudioFocusChangeListener(listener, Handler(Looper.getMainLooper()))
+            .setOnAudioFocusChangeListener({ change -> onFocusChanged(generation, change) }, Handler(Looper.getMainLooper()))
             .build()
         request = next
         requestedChannel = primary.channel
-        val result = manager?.requestAudioFocus(next)
+        val result = if (factoryRouting && mediaSuppressed && primary.channel == AudioChannel.MEDIA) {
+            focusHeld = false
+            focusVolume = 0f
+            applyVolumes()
+            null
+        } else requestCurrentFocus()
         val line = "Audio: focus requested channel=${primary.channel} gain=$gain granted=$result activeTracks=${active.size}"
         Log.i(TAG, line)
         runCatching { report(line) }
     }
 
-    private fun setVolume(volume: Float) {
-        active.keys.forEach { track -> runCatching { track.setStereoVolume(volume, volume) } }
+    private fun requestCurrentFocus(): Int? {
+        val current = request ?: return null
+        val result = manager?.requestAudioFocus(current)
+        focusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        focusVolume = if (factoryRouting && !focusHeld) 0f else FULL_VOLUME
+        applyVolumes()
+        return result
+    }
+
+    private fun applyVolumes() {
+        val navigationActive = active.values.any { it.channel == AudioChannel.NAVIGATION }
+        active.forEach { (track, entry) ->
+            val localVolume = when {
+                !factoryRouting -> FULL_VOLUME
+                entry.channel == AudioChannel.MEDIA && navigationActive -> DUCKED_VOLUME
+                entry.channel == requestedChannel || requestedChannel == AudioChannel.MEDIA -> FULL_VOLUME
+                else -> 0f
+            }
+            val volume = if (factoryRouting && mediaSuppressed && entry.channel == AudioChannel.MEDIA) 0f else focusVolume * localVolume
+            runCatching { track.setStereoVolume(volume, volume) }
+        }
     }
 
     private fun AudioChannel.focusPriority(): Int = when (this) {
-        AudioChannel.MEDIA -> 3
-        AudioChannel.PHONE -> 2
-        AudioChannel.ASSISTANT -> 1
-        AudioChannel.NAVIGATION -> 0
+        AudioChannel.PHONE -> 4
+        AudioChannel.ASSISTANT, AudioChannel.RINGTONE -> 3
+        AudioChannel.NAVIGATION -> 2
+        AudioChannel.MEDIA -> 1
     }
 
     private companion object {
@@ -140,13 +207,16 @@ class AndroidMediaSink(
     private val onAudioDiagnostic: (String) -> Unit = {},
     /** True while any music ("media") audio stream is running; called from media threads. */
     private val onMediaAudioChanged: (Boolean) -> Unit = {},
+    private val wirelessAudio: Boolean = false,
 ) : MediaSink {
     private val appContext = context?.applicationContext
+    private val factoryAudio = appContext?.let(GeelyFactoryCarPlay::load)
     private val audioManager = appContext?.getSystemService(AudioManager::class.java)
     private val audioFocusCoordinator = AudioFocusCoordinator(
         appContext,
         audioFocusEnabled,
         onAudioDiagnostic,
+        factoryRouting = factoryAudio != null,
     )
     private val screenStateLock = Any()
     private val activeScreenTypes = mutableSetOf<Int>()
@@ -292,7 +362,10 @@ class AndroidMediaSink(
         // This callback runs on the downlink thread; microphone failures must not stop playback.
         try {
             if (config.audioType == "telephony") enterCommunicationMode(id)
-            val uplink = microphoneUplinks.computeIfAbsent(id) { MicrophoneUplink(config, onAudioDiagnostic) }
+            val uplink = microphoneUplinks.computeIfAbsent(id) {
+                MicrophoneUplink(config, onAudioDiagnostic,
+                    factorySource = factoryAudio?.microphoneSource(config.audioType, config.sampleRate, wirelessAudio))
+            }
             if (!uplink.start()) {
                 microphoneUplinks.remove(id, uplink)
                 restoreAudioMode(id)
@@ -340,6 +413,7 @@ class AndroidMediaSink(
     }
 
     fun close() {
+        audioFocusCoordinator.close()
         synchronized(screenStateLock) {
             activeScreenTypes.forEach { screenStreamActiveChanged?.invoke(it, false) }
             activeScreenTypes.clear()
@@ -396,8 +470,11 @@ class AndroidMediaSink(
             navigationStreamType,
             mediaBufferMillis,
             onAudioDiagnostic,
+            factoryAudio,
         ).also { audioRenderers[id] = it }
     }
+
+    fun onMediaPlaying(playing: Boolean) = audioFocusCoordinator.onMediaPlaying(playing)
 }
 
 /** Serial MediaCodec video decoder: one worker owns configure and frame feeding. */
@@ -783,6 +860,7 @@ private class AudioRenderer(
     private val navigationStreamType: Int,
     private val mediaBufferMillis: Int,
     private val report: (String) -> Unit,
+    private val factoryAudio: GeelyFactoryCarPlay?,
 ) : Closeable {
     private data class AudioPacket(val rtp: ByteArray, val sample: Int)
 
@@ -929,7 +1007,11 @@ private class AudioRenderer(
         }
         codec = try {
             MediaCodecStartup.create(
-                create = { diagnosticStage = "decoder-create"; MediaCodec.createDecoderByType(mime) },
+                create = {
+                    diagnosticStage = "decoder-create"
+                    if (mime == MediaFormat.MIMETYPE_AUDIO_OPUS) createOpusDecoder()
+                    else MediaCodec.createDecoderByType(mime)
+                },
                 configure = { diagnosticStage = "decoder-configure"; it.configure(mediaFormat, null, null, 0) },
                 start = { diagnosticStage = "decoder-start"; it.start() },
                 release = { it.release() },
@@ -1061,13 +1143,13 @@ private class AudioRenderer(
                 Log.w(TAG, "legacy audio stream $streamOverride rejected; keeping usage routing", error)
             }
         }
-        return AudioAttributes.Builder()
-            .setUsage(usageFor(selection.channel))
-            .setContentType(contentTypeFor(selection.contentType))
-            .build()
+        return audioAttributesFor(selection)
     }
 
     private fun mappedSelection(): AudioChannelSelection {
+        if (factoryAudio != null && format.audioType.equals("alert", true)) {
+            return AudioChannelSelection(AudioChannel.RINGTONE, AudioContentType.SPEECH)
+        }
         val mode = if (advancedAudioChannelMapping) {
             AudioChannelMappingMode.AUTOMOTIVE_BUS
         } else {
@@ -1077,23 +1159,27 @@ private class AudioRenderer(
             audioType = format.audioType,
             payloadType = format.payloadType,
             mode = mode,
+            navigationStreamType = navigationStreamType,
         )
     }
 
-    private fun audioAttributesFor(selection: AudioChannelSelection): AudioAttributes =
-        AudioAttributes.Builder()
-            .setUsage(usageFor(selection.channel))
-            .setContentType(contentTypeFor(selection.contentType))
-            .build()
+    private fun audioAttributesFor(selection: AudioChannelSelection): AudioAttributes {
+        val usage = usageFor(selection.channel)
+        val attributes = AudioAttributes.Builder().setUsage(usage)
+            .setContentType(contentTypeFor(selection.contentType)).build()
+        if (attributes.usage == usage) return attributes
+        Log.w(TAG, "Factory audio usage $usage rejected; using Android usage")
+        return AudioAttributes.Builder().setUsage(standardUsageFor(selection.channel))
+            .setContentType(contentTypeFor(selection.contentType)).build()
+    }
 
     /**
-     * Shares a sink-level focus request across all active non-navigation renderers.
-     * Navigation guidance intentionally takes no focus: it overlays media without ducking it.
+     * Shares the sink's focus owner. The factory profile also requests transient navigation focus.
      */
     private fun requestAudioFocus() {
         val channel = mappedChannel ?: return
         val attributes = trackAttributes ?: return
-        if (channel == AudioChannel.NAVIGATION) {
+        if (channel == AudioChannel.NAVIGATION && factoryAudio == null) {
             Log.i(TAG, "audio focus skipped channel=NAVIGATION; overlays without ducking")
             return
         }
@@ -1132,11 +1218,23 @@ private class AudioRenderer(
         return byteArrayOf((value ushr 8).toByte(), value.toByte())
     }
 
-    private fun usageFor(channel: AudioChannel): Int = when (channel) {
+    private fun usageFor(channel: AudioChannel): Int {
+        val kind = when (channel) {
+            AudioChannel.MEDIA -> "MEDIA"
+            AudioChannel.PHONE -> "PHONE"
+            AudioChannel.ASSISTANT -> "SIRI"
+            AudioChannel.NAVIGATION -> "GUIDANCE"
+            AudioChannel.RINGTONE -> "RING"
+        }
+        return factoryAudio?.audioUsage(kind, standardUsageFor(channel)) ?: standardUsageFor(channel)
+    }
+
+    private fun standardUsageFor(channel: AudioChannel): Int = when (channel) {
         AudioChannel.MEDIA -> AudioAttributes.USAGE_MEDIA
         AudioChannel.PHONE -> AudioAttributes.USAGE_VOICE_COMMUNICATION
         AudioChannel.ASSISTANT -> AudioAttributes.USAGE_ASSISTANT
         AudioChannel.NAVIGATION -> AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+        AudioChannel.RINGTONE -> AudioAttributes.USAGE_NOTIFICATION_RINGTONE
     }
 
     private fun contentTypeFor(contentType: AudioContentType): Int = when (contentType) {

@@ -19,7 +19,7 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_BYTES)
         }
-        MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS).also {
+        createOpusEncoder().also {
             it.configure(
                 format,
                 null,
@@ -27,7 +27,7 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
                 MediaCodec.CONFIGURE_FLAG_ENCODE,
             )
             it.start()
-            Log.i(TAG, "Opus microphone encoder started bitrate=$bitrate")
+            Log.i(TAG, "Opus microphone encoder started bitrate=$bitrate name=${it.name}")
         }
     } catch (error: Exception) {
         Log.w(TAG, "Opus microphone encoder unavailable", error)

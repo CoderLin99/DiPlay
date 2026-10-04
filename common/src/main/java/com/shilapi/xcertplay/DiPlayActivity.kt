@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -29,6 +30,7 @@ import android.widget.*
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.ViewCompat
 import androidx.core.view.doOnLayout
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -70,10 +72,15 @@ class DiPlayActivity : ComponentActivity() {
     private var initialLaunch = true
     private var notificationTransport = true
     private var exportInProgress = false
+    private var reportUploadInProgress = false
+    private var reportIssueDescription = ""
     private var navigationStreamType = 14
     private var testToneTrack: AudioTrack? = null
     private var toneStop: Runnable? = null
     private var exportButton: Button? = null
+    private var reportUploadButton: Button? = null
+    private var reportIssueInput: EditText? = null
+    private var developerVersionTaps = 0
     private var rootScroll: ScrollView? = null
     private var renderedPage: String? = null
     private var pendingScrollY: Int? = null
@@ -146,6 +153,18 @@ class DiPlayActivity : ComponentActivity() {
     private val export = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) exportDiagnostics(uri)
     }
+    private val iconImageCrop = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) render()
+    }
+    private val iconImagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            iconImageCrop.launch(
+                Intent(this, ImageCropActivity::class.java)
+                    .setData(uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+            )
+        }
+    }
 
     private var languagePreferenceAtCreate = AppLocale.SYSTEM
 
@@ -156,18 +175,20 @@ class DiPlayActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         languagePreferenceAtCreate = AppLocale.preference(this)
+        SteeringProfiles.cancelLegacyUpload(this)
         com.shilapi.xcertplay.hud.BydNavigationOutputs.onAppOpened(applicationContext)
-        WindowCompat.setDecorFitsSystemWindows(window, true)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = BG; window.navigationBarColor = BG
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = false
-            hide(WindowInsetsCompat.Type.statusBars())
+            show(WindowInsetsCompat.Type.systemBars())
         }
         setupError = runCatching { DiPlayBootstrap.ensure(this) }.exceptionOrNull()?.let {
             android.util.Log.e("DiPlaySetup", "CarPlay authentication could not be loaded", it)
             getString(R.string.setup_error_auth)
         }
         pendingCarHotspotSetup = savedInstanceState?.getBoolean("pending_car_hotspot") ?: false
+        reportIssueDescription = savedInstanceState?.getString("report_issue_description").orEmpty()
         bydVehicleAdvancedExpanded = savedInstanceState?.getBoolean("byd_vehicle_advanced") ?: false
         page = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: "home"
         render()
@@ -189,8 +210,10 @@ class DiPlayActivity : ComponentActivity() {
         handleWirelessRecovery()
     }
     override fun onSaveInstanceState(outState: Bundle) {
+        reportIssueDescription = reportIssueInput?.text?.toString() ?: reportIssueDescription
         outState.putString("page", page)
         outState.putBoolean("pending_car_hotspot", pendingCarHotspotSetup)
+        outState.putString("report_issue_description", reportIssueDescription)
         outState.putBoolean("byd_vehicle_advanced", bydVehicleAdvancedExpanded)
         super.onSaveInstanceState(outState)
     }
@@ -254,14 +277,27 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun render() {
+        reportIssueDescription = reportIssueInput?.text?.toString() ?: reportIssueDescription
         // A restore still waiting for layout keeps its target: the old page was never laid out.
         val previousScrollY = (pendingScrollY ?: rootScroll?.scrollY)?.takeIf { renderedPage == page }
         status = null; connectButton = null; disconnectButton = null; lastRunning = null
+        reportUploadButton = null; reportIssueInput = null
         bydAdbControls = null
         adbSwitches.clear()
         adbStatus = null
-        val scroll = ScrollView(this).apply { setBackgroundColor(BG); isFillViewport = true; clipToPadding = false }
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(BG)
+            isFillViewport = true
+            clipToPadding = true
+        }
         rootScroll = scroll
+        ViewCompat.setOnApplyWindowInsetsListener(scroll) { view, insets ->
+            val safeInsets = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+            )
+            view.setPadding(safeInsets.left, safeInsets.top, safeInsets.right, safeInsets.bottom)
+            insets
+        }
         val content = column().apply { setPadding(dp(32), dp(24), dp(32), dp(32)) }
         scroll.addView(content)
         val header = row().apply { gravity = Gravity.CENTER_VERTICAL }
@@ -280,6 +316,7 @@ class DiPlayActivity : ComponentActivity() {
             else -> home(content)
         }
         setContentView(scroll)
+        ViewCompat.requestApplyInsets(scroll)
         renderedPage = page
         refreshStatus()
         pendingScrollY = previousScrollY
@@ -403,6 +440,33 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(button(getString(R.string.choose_save_location), false) { chooseReportDestination() }, matchButton(10, 60))
             val destination = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getString(R.string.reports_save_to_downloads_diplay) else getString(R.string.choose_where_to_save_your_report)
             card.addView(label(destination + getString(R.string.nothing_is_sent_automatically_protocol_payloads_and_creden), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
+            reportIssueInput = EditText(this).apply {
+                hint = getString(R.string.describe_the_problem)
+                setText(reportIssueDescription)
+                setTextColor(TEXT)
+                setHintTextColor(MUTED)
+                minLines = 3
+                maxLines = 6
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                backgroundTintList = ColorStateList.valueOf(ACCENT)
+            }
+            card.addView(reportIssueInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
+            reportUploadButton = button(
+                if (reportUploadInProgress) getString(R.string.uploading_to_cloud) else getString(R.string.upload_report_to_cloud),
+                true,
+            ) {
+                val description = reportIssueInput?.text?.toString()?.trim().orEmpty()
+                if (description.isEmpty()) {
+                    toast(getString(R.string.describe_problem_before_uploading))
+                } else if (description.length > GitHubIssueReport.MAX_DESCRIPTION_LENGTH) {
+                    toast(getString(R.string.problem_description_too_long))
+                } else {
+                    reportIssueDescription = description
+                    prepareGitHubReport(description)
+                }
+            }.apply { isEnabled = !reportUploadInProgress }
+            card.addView(reportUploadButton, matchButton(12, 60))
+            card.addView(label(getString(R.string.report_upload_privacy), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
         }
         section(content, getString(R.string.automatic_connection), R.drawable.ic_dp_automation) { card ->
             toggle(card, getString(R.string.connect_when_diplay_opens), getString(R.string.use_your_last_connection_type_and_selected_iphone), DiPlayPreferences.autoConnect(this)) { DiPlayPreferences.saveAutoConnect(this, it) }
@@ -432,6 +496,31 @@ class DiPlayActivity : ComponentActivity() {
                 AirPlayPersistence.saveHideTopBar(this, it); AirPlayPersistence.saveHideBottomBar(this, it)
             }
         }
+        section(content, getString(R.string.return_home_icon), R.drawable.ic_carplay) { card ->
+            val preview = ImageView(this).apply {
+                contentDescription = getString(R.string.return_home_icon)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(10).toFloat()
+                    setColor(SURFACE)
+                }
+                val custom = runCatching {
+                    AirPlayPersistence.loadCustomAirPlayIconFile(this@DiPlayActivity)?.readBytes()
+                }.getOrNull()
+                if (custom != null) {
+                    setImageBitmap(BitmapFactory.decodeByteArray(custom, 0, custom.size))
+                } else {
+                    setImageResource(R.drawable.ic_car_home_fallback)
+                }
+            }
+            card.addView(preview, LinearLayout.LayoutParams(dp(88), dp(88)).apply { gravity = Gravity.CENTER_HORIZONTAL })
+            card.addView(button(getString(R.string.choose_image), false) { iconImagePicker.launch("image/*") }, matchButton(12, 60))
+            card.addView(button(getString(R.string.default_icon), false) {
+                AirPlayPersistence.clearCustomAirPlayIcon(this)
+                render()
+            }, matchButton(10, 60))
+            card.addView(label(getString(R.string.return_home_icon_description), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
+        }
         section(content, getString(R.string.audio_routing)) { card ->
             toggle(card, getString(R.string.contrib_audio_home_toggle_audio_focus), getString(R.string.contrib_audio_home_toggle_audio_focus_desc), AirPlayPersistence.loadAudioFocusEnabled(this)) { AirPlayPersistence.saveAudioFocusEnabled(this, it) }
             if (resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)) {
@@ -459,6 +548,57 @@ class DiPlayActivity : ComponentActivity() {
                 // Dashboard song needs ADB, not the navigation receiver; show it here when that card is hidden.
                 if (!BydOutputSettings.navigationAvailable(this)) clusterSongSwitch(card)
             }
+        }
+        section(content, getString(R.string.geely_vehicle), R.drawable.ic_dp_navigation) { card ->
+            toggle(
+                card,
+                getString(R.string.geely_hud_navigation),
+                getString(R.string.geely_hud_navigation_description),
+                AirPlayPersistence.loadGeelyHudEnabled(this),
+            ) { GeelyHudProjection.setEnabled(this, it) }
+            val hudDisplays = GeelyHudProjection.availableDisplays(this)
+            if (hudDisplays.isEmpty()) {
+                card.addView(
+                    label(getString(R.string.geely_hud_no_projection_display), 14, MUTED).apply {
+                        setPadding(0, dp(4), 0, dp(12))
+                    },
+                )
+            } else {
+                val savedDisplayId = AirPlayPersistence.loadGeelyHudDisplayId(this)
+                val savedDisplayName = AirPlayPersistence.loadGeelyHudDisplayName(this)
+                val selectedDisplayIndex = hudDisplays.indexOfFirst {
+                    it.id == savedDisplayId || it.name == savedDisplayName
+                }
+                val displayOptions = listOf(getString(R.string.geely_hud_projection_auto)) +
+                    hudDisplays.map {
+                        getString(
+                            R.string.geely_hud_projection_display,
+                            it.name,
+                            it.width,
+                            it.height,
+                            it.id,
+                        )
+                    }
+                choice(
+                    card,
+                    getString(R.string.geely_hud_projection_screen),
+                    displayOptions,
+                    selectedDisplayIndex + 1,
+                    reconnects = false,
+                ) { index -> GeelyHudProjection.selectDisplay(this, hudDisplays.getOrNull(index - 1)) }
+            }
+            toggle(
+                card,
+                getString(R.string.geely_steering_wheel),
+                getString(R.string.geely_steering_wheel_description),
+                AirPlayPersistence.loadGeelySteeringEnabled(this),
+            ) { CarPlayMediaKeys.setGeelySteeringEnabled(this, it) }
+        }
+        section(content, getString(R.string.steering_identification), R.drawable.ic_dp_navigation) { card ->
+            card.addView(label(getString(R.string.steering_panel_intro), 17, MUTED))
+            card.addView(button(getString(R.string.steering_identify), false) {
+                startActivity(Intent(this, SteeringControlsActivity::class.java))
+            }, matchButton(12, 60))
         }
         if (BydOutputSettings.navigationAvailable(this)) section(content, getString(R.string.byd_navigation), R.drawable.ic_dp_navigation) { card ->
             toggle(card, getString(R.string.navigation_on_hud_and_instrument_cluster),
@@ -614,9 +754,28 @@ class DiPlayActivity : ComponentActivity() {
         content.addView(label(getString(R.string.carplay_at_home_in_your_car), 20, MUTED).apply { setPadding(0, dp(8), 0, dp(24)) })
         section(content, "${getString(R.string.about_public_preview_prefix)}${version()}") { card ->
             card.addView(label(getString(R.string.an_independent_carplay_receiver_for_android_head_units_wir), 17, TEXT))
+            card.addView(button(getString(R.string.steering_version, version()), false) {
+                developerVersionTaps++
+                if (developerVersionTaps >= 7) { SteeringProfiles.unlockDeveloper(this); render() }
+            }, matchButton(12, 56))
+            if (SteeringProfiles.developerUnlocked(this)) card.addView(button(getString(R.string.steering_diagnostics), false) {
+                startActivity(Intent(this, SteeringControlsActivity::class.java).putExtra("developer", true))
+            }, matchButton(10, 56))
         }
         section(content, getString(R.string.made_possible_by_open_source)) { card ->
             card.addView(label(getString(R.string.receiver_based_on_xcertplay_licensed_under_gpl_3_0_diplay), 16, MUTED))
+        }
+        section(content, getString(R.string.ui_project_source)) { card ->
+            card.addView(label(getString(R.string.ui_carlito_modification_credit), 16, MUTED))
+            card.addView(button(getString(R.string.ui_open_upstream_source), false) {
+                openProjectLink("https://github.com/shihabal3amri/DiPlay")
+            }, matchButton(8, 56))
+            card.addView(button(getString(R.string.ui_open_carlito_fork), false) {
+                openProjectLink("https://github.com/carlito12345/diplay")
+            }, matchButton(8, 56))
+            card.addView(button(getString(R.string.github_fork_source), false) {
+                openProjectLink(GitHubIssueReport.REPOSITORY)
+            }, matchButton(12, 58))
         }
     }
 
@@ -2034,6 +2193,119 @@ class DiPlayActivity : ComponentActivity() {
         runCatching { export.launch(reportFileName()) }.onFailure { exportDiagnostics() }
     }
 
+    private fun buildDiagnosticReport(appContext: Context): String = buildString {
+        appendLine("DiPlay ${version()} · private beta diagnostic report")
+        appendLine("Fork build: CoderLin99/DiPlay ${GitHubIssueReport.BUILD}")
+        appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
+        appendLine("Head unit: ${Build.MANUFACTURER} ${Build.MODEL}")
+        appendLine("Connection: ${if (AirPlayPersistence.loadWirelessEnabled(appContext)) "wireless" else "USB"}")
+        appendLine("Authentication: local experimental beta identity; no remote fallback")
+        appendLine("CarPlay setup: ${if (setupError == null) "ready" else "authentication unavailable"}")
+        appendLine("Saved video preference (may differ from active session): ${if (AirPlayPersistence.loadHevcEnabled(appContext)) "HEVC" else "H.264"}; ${AirPlayPersistence.loadFps(appContext)} fps")
+        appendLine("CarPlay size: ${com.shilapi.xcertplay.airplay.CarPlaySize.fromWidthMillimeters(AirPlayPersistence.loadWidthPhysicalMm(appContext)).label}")
+        appendLine("Saved resolution preference (may differ from active session): ${AirPlayPersistence.loadDisplayScaleTenths(appContext) * 10}%")
+        appendLine("Session: ${if (CarPlayBackgroundSession.active) "active" else if (CarPlayBackgroundSession.hasSession()) "connecting" else "stopped"}")
+        appendLine("Head-unit board: ${Build.BOARD}; hardware: ${Build.HARDWARE}; build: ${Build.DISPLAY}")
+        appendLine()
+        appendLine("--- BYD vehicle-data probe ---")
+        appendLine(
+            "mode=${if (BydOutputSettings.legacyVehicleProbe(appContext)) "legacy-probe" else "default"} " +
+                "switches location=${AirPlayPersistence.loadLocationReportingEnabled(appContext)} " +
+                "battery=${BydOutputSettings.batteryToIphone(appContext)} " +
+                "wheelSpeed=${BydOutputSettings.wheelSpeedToIphone(appContext)} " +
+                "parkedVideo=${BydOutputSettings.videoWhileParked(appContext)}",
+        )
+        val bydCapabilities = BydVehicleFieldStore.load(appContext)
+        if (bydCapabilities == null) {
+            appendLine("no saved successful probe")
+        } else {
+            appendLine(
+                "catalog=${bydCapabilities.catalogAvailable} detectedAt=${bydCapabilities.detectedAtMillis} " +
+                    "savedFirmware=${bydCapabilities.firmwareKey} " +
+                    "currentFirmware=${BydVehicleFieldStore.firmwareKey()}",
+            )
+            for (field in BydVehicleField.entries) {
+                val probe = bydCapabilities.result(field)
+                appendLine(
+                    "${field.name}: supported=${probe.supported} " +
+                        (probe.address?.let {
+                            "tx=${it.transaction} dev=${it.device} fid=${it.fid} source=${it.source}"
+                        } ?: "address=none"),
+                )
+            }
+        }
+        appendLine()
+        appendLine("--- Last display negotiation (timestamps distinguish it from current settings) ---")
+        appendLine(DisplayDiagnosticSnapshot.report(appContext))
+        appendLine()
+        appendLine("--- Last received boot and app-launch result ---")
+        appendLine(StartupDiagnosticSnapshot.report(appContext))
+        appendLine("Startup settings: openAfterBoot=${AirPlayPersistence.loadAutoStartOnBoot(appContext)} " +
+            "connectWhenOpened=${DiPlayPreferences.autoConnect(appContext)}")
+        appendLine()
+        appendLine("--- HUD projection ---")
+        appendLine(GeelyHudProjection.diagnosticReport(appContext))
+        appendLine()
+        appendLine("--- Steering controls ---")
+        appendLine(CarPlayMediaKeys.steeringDiagnostics())
+        appendLine()
+        appendLine("--- Recent own-app process exits (Android 11+) ---")
+        appendLine(ProcessExitDiagnostics.report(appContext))
+        appendLine()
+        for (name in SessionLogFile.REPORT_NAMES) {
+            val file = File(appContext.filesDir, "logs/$name")
+            if (file.isFile) {
+                appendLine("--- $name ---")
+                file.useLines { lines ->
+                    lines.forEach { line -> DiagnosticRedactor.redact(line)?.let { appendLine(it) } }
+                }
+            }
+        }
+    }
+
+    private fun prepareGitHubReport(issueDescription: String) {
+        if (reportUploadInProgress) return
+        reportUploadInProgress = true
+        reportUploadButton?.apply { isEnabled = false; text = getString(R.string.uploading_to_cloud) }
+        val appContext = applicationContext
+        val fileName = reportFileName()
+        Thread({
+            val result = runCatching {
+                val draft = GitHubIssueReport.prepare(fileName, issueDescription, buildDiagnosticReport(appContext))
+                val saved = DiagnosticExportStore.saveWithoutPicker(appContext, fileName, draft.report)
+                draft to saved
+            }
+            runOnUiThread {
+                reportUploadInProgress = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                reportUploadButton?.apply { isEnabled = true; text = getString(R.string.upload_report_to_cloud) }
+                result.onSuccess { (draft, saved) ->
+                    AlertDialog.Builder(this)
+                        .setTitle(getString(R.string.github_report_ready))
+                        .setMessage(getString(R.string.github_report_instructions, fileName))
+                        .setPositiveButton(getString(R.string.github_open_issue)) { _, _ -> openProjectLink(draft.url) }
+                        .setNegativeButton(getString(R.string.view_diagnostic_report)) { _, _ -> showDiagnosticReport(draft.report) }
+                        .setNeutralButton(getString(R.string.share)) { _, _ ->
+                            runCatching {
+                                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_STREAM, saved.uri)
+                                    putExtra(Intent.EXTRA_TEXT, draft.url)
+                                    clipData = android.content.ClipData.newRawUri(getString(R.string.report_clip_label), saved.uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }, getString(R.string.share_diagnostic_report)))
+                            }.onFailure { showDiagnosticReport(draft.report) }
+                        }.show()
+                }.onFailure {
+                    AlertDialog.Builder(this).setTitle(getString(R.string.report_upload_failed))
+                        .setMessage(getString(R.string.report_upload_failed_message))
+                        .setPositiveButton(getString(R.string.retry_report_upload)) { _, _ -> prepareGitHubReport(issueDescription) }
+                        .setNegativeButton(getString(R.string.close), null).show()
+                }
+            }
+        }, "diplay-github-report").start()
+    }
+
     private fun exportDiagnostics(uri: Uri? = null) {
         if (exportInProgress) return
         exportInProgress = true
@@ -2042,63 +2314,7 @@ class DiPlayActivity : ComponentActivity() {
         val fileName = reportFileName()
         Thread({
             val result = runCatching {
-                val report = buildString {
-                    appendLine("DiPlay ${version()} · private beta diagnostic report")
-                    appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
-                    appendLine("Head unit: ${Build.MANUFACTURER} ${Build.MODEL}")
-                    appendLine("Connection: ${if (AirPlayPersistence.loadWirelessEnabled(appContext)) "wireless" else "USB"}")
-                    appendLine("Authentication: local experimental beta identity; no remote fallback")
-                    appendLine("CarPlay setup: ${if (setupError == null) "ready" else "authentication unavailable"}")
-                    appendLine("Saved video preference (may differ from active session): ${if (AirPlayPersistence.loadHevcEnabled(appContext)) "HEVC" else "H.264"}; ${AirPlayPersistence.loadFps(appContext)} fps")
-                    appendLine("CarPlay size: ${com.shilapi.xcertplay.airplay.CarPlaySize.fromWidthMillimeters(AirPlayPersistence.loadWidthPhysicalMm(appContext)).label}")
-                    appendLine("Saved resolution preference (may differ from active session): ${AirPlayPersistence.loadDisplayScaleTenths(appContext) * 10}%")
-                    appendLine("Session: ${if (CarPlayBackgroundSession.active) "active" else if (CarPlayBackgroundSession.hasSession()) "connecting" else "stopped"}")
-                    appendLine("Head-unit board: ${Build.BOARD}; hardware: ${Build.HARDWARE}; build: ${Build.DISPLAY}")
-                    appendLine()
-                    appendLine("--- BYD vehicle-data probe ---")
-                    appendLine(
-                        "mode=${if (BydOutputSettings.legacyVehicleProbe(appContext)) "legacy-probe" else "default"} " +
-                            "switches location=${AirPlayPersistence.loadLocationReportingEnabled(appContext)} " +
-                            "battery=${BydOutputSettings.batteryToIphone(appContext)} " +
-                            "wheelSpeed=${BydOutputSettings.wheelSpeedToIphone(appContext)} " +
-                            "parkedVideo=${BydOutputSettings.videoWhileParked(appContext)}",
-                    )
-                    val bydCapabilities = BydVehicleFieldStore.load(appContext)
-                    if (bydCapabilities == null) {
-                        appendLine("no saved successful probe")
-                    } else {
-                        appendLine(
-                            "catalog=${bydCapabilities.catalogAvailable} detectedAt=${bydCapabilities.detectedAtMillis} " +
-                                "savedFirmware=${bydCapabilities.firmwareKey} " +
-                                "currentFirmware=${BydVehicleFieldStore.firmwareKey()}",
-                        )
-                        for (field in BydVehicleField.entries) {
-                            val probe = bydCapabilities.result(field)
-                            appendLine("${field.name}: supported=${probe.supported} " +
-                                (probe.address?.let { "tx=${it.transaction} dev=${it.device} fid=${it.fid} source=${it.source}" }
-                                    ?: "address=none"))
-                        }
-                    }
-                    appendLine()
-                    appendLine("--- Last display negotiation (timestamps distinguish it from current settings) ---")
-                    appendLine(DisplayDiagnosticSnapshot.report(appContext))
-                    appendLine()
-                    appendLine("--- Last received boot and app-launch result ---")
-                    appendLine(StartupDiagnosticSnapshot.report(appContext))
-                    appendLine("Startup settings: openAfterBoot=${AirPlayPersistence.loadAutoStartOnBoot(appContext)} " +
-                        "connectWhenOpened=${DiPlayPreferences.autoConnect(appContext)}")
-                    appendLine()
-                    appendLine("--- Recent own-app process exits (Android 11+) ---")
-                    appendLine(ProcessExitDiagnostics.report(appContext))
-                    appendLine()
-                    for (name in SessionLogFile.REPORT_NAMES) {
-                        val file = File(appContext.filesDir, "logs/$name")
-                        if (file.isFile) {
-                            appendLine("--- $name ---")
-                            file.useLines { lines -> lines.forEach { line -> DiagnosticRedactor.redact(line)?.let { appendLine(it) } } }
-                        }
-                    }
-                }
+                val report = buildDiagnosticReport(appContext)
                 val savedReport = if (uri != null) {
                     DiagnosticExportStore.write(appContext.contentResolver, uri, report)
                     DiagnosticExportStore.SavedReport(uri)
@@ -2155,6 +2371,10 @@ class DiPlayActivity : ComponentActivity() {
         }.setNegativeButton(getString(R.string.later), null).show()
     }
     private fun openSystem(intent: Intent) { runCatching { startActivity(intent) }.onFailure { toast(getString(R.string.open_this_setting_from_your_car_s_settings_app)) } }
+    private fun openProjectLink(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            .onFailure { toast(getString(R.string.ui_project_link_failed)) }
+    }
     private fun toast(message: String) { Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
 
     private fun playTestTone(streamType: Int) {

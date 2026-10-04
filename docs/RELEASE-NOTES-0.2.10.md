@@ -2,6 +2,12 @@
 
 Public preview for compatible Android 9 and newer head units. This release adds targeted connection improvements, CarPlay song artwork, optional video while in P, and further BYD integration controls.
 
+## Geely fork integration
+
+This fork follows upstream version **0.2.10 / code 29** and retains the Geely return-to-home artwork, audio-focus ownership, factory microphone-source fallback, active-phone Bluetooth music handoff, independently learned steering controls and explicit HUD-display overlay. Upstream call effects and song artwork are integrated with these paths. See [user update notes](UPDATE-NOTES-0.2.10.md) and [Geely evidence and limits](GEELY-FACTORY-CARPLAY.md).
+
+The validation and download descriptions below document the upstream release. This fork's combined build results and signed APK are published by its own GitHub Actions workflow. G636 / FX11 hardware behavior still requires confirmation with an iPhone.
+
 ## Release highlights
 
 - CarPlay song title, artist, album, playback position and album artwork are available through Android's media session for compatible launchers and media displays.
