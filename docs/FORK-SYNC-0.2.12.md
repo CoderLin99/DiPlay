@@ -22,3 +22,7 @@
 - 保留覆盖升级签名和外部身份资源构建方式；Git 仓库不包含身份文件或签名密钥。
 
 源码合并通过仓库 Android checks 验证；测试、Lint 和编译结果以对应提交的 Actions 为准，实车表现仍需新的诊断报告确认。
+
+## 自动验证结果
+
+代码提交 `a5b73e5` 的 [Android checks](https://github.com/CoderLin99/DiPlay/actions/runs/37259220299) 已通过：共 1211 项单元测试，零失败、零跳过；mobile、home、maphost 的 Debug Lint 与源码 APK 编译通过。检查产物为不含配件身份的源码测试 APK，不作为装车安装包提供。
