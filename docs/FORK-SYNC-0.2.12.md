@@ -26,3 +26,9 @@
 ## 自动验证结果
 
 代码提交 `a5b73e5` 的 [Android checks](https://github.com/CoderLin99/DiPlay/actions/runs/37259220299) 已通过：共 1211 项单元测试，零失败、零跳过；mobile、home、maphost 的 Debug Lint 与源码 APK 编译通过。检查产物为不含配件身份的源码测试 APK，不作为装车安装包提供。
+
+## 后续 Release 构建
+
+[Release 构建 37260382149](https://github.com/CoderLin99/DiPlay/actions/runs/37260382149)已完成，APK 版本 `0.2.12-geely.1`、versionCode `34`。1211 项测试与 Debug/Release Lint 均通过，配件身份核对一致，签名与此前 CoderLin99 安装包相同。安装包及对应源码已保存于仓库 Release 草稿，尚未公开发布。
+
+APK SHA256：`378fe2dfb274921d08406b79f805fafefbdea84a63eb05b92e679def3ebfe5b0`。
