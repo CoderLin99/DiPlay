@@ -37,6 +37,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.doOnLayout
 import androidx.core.view.WindowCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.adb.LocalAdb
@@ -227,7 +228,6 @@ class DiPlayActivity : ComponentActivity() {
         outState.putString("report_issue_description", reportIssueDescription)
         outState.putString("page", page)
         outState.putBoolean("pending_car_hotspot", pendingCarHotspotSetup)
-        outState.putString("report_issue_description", reportIssueDescription)
         outState.putString("pending_export_description", pendingExportDescription)
         outState.putBoolean("export_picker_pending", exportPickerPending)
         outState.putBoolean("byd_vehicle_advanced", bydVehicleAdvancedExpanded)
@@ -314,7 +314,6 @@ class DiPlayActivity : ComponentActivity() {
         // A restore still waiting for layout keeps its target: the old page was never laid out.
         val previousScrollY = (pendingScrollY ?: rootScroll?.scrollY)?.takeIf { renderedPage == page }
         status = null; connectButton = null; disconnectButton = null; lastRunning = null
-        reportIssueInput = null
         bydAdbControls = null
         adbSwitches.clear()
         adbStatus = null
