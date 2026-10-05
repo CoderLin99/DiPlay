@@ -1,11 +1,17 @@
 package com.shilapi.xcertplay
 
+import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.shilapi.xcertplay.vehicle.GeelyFactoryCarPlay
+import com.shilapi.xcertplay.media.AudioOutputDevice
 import java.io.Closeable
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -14,7 +20,10 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.sin
 
 /** Plays one short tone through the same legacy stream route used by CarPlay audio. */
-internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : Closeable {
+internal class AudioChannelPreview(context: Context? = null, private val onUnavailable: (Int) -> Unit) : Closeable {
+    private val factoryAudio = context?.applicationContext?.let(GeelyFactoryCarPlay::load)
+    private val audioManager = context?.getSystemService(AudioManager::class.java)
+    private val focusEnabled = context?.let(AirPlayPersistence::loadAudioFocusEnabled) == true
     private val mainHandler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { task ->
         Thread(task, "diplay-channel-preview").apply { isDaemon = true }
@@ -24,7 +33,7 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
     private var pending: Future<*>? = null
     @Volatile private var closed = false
 
-    fun play(channel: Int, navigation: Boolean) {
+    fun play(channel: Int, navigation: Boolean, output: AudioOutputDevice? = null) {
         if (closed) return
         require(channel in AirPlayPersistence.AUDIO_CHANNELS)
         val request = generation.incrementAndGet()
@@ -32,6 +41,7 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
         activeTrack.get()?.let { runCatching { it.stop() } }
         pending = worker.submit {
             var track: AudioTrack? = null
+            var focusRequest: AudioFocusRequest? = null
             try {
                 if (closed || generation.get() != request) return@submit
                 val pcm = tone()
@@ -40,16 +50,18 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
                 )
                 check(minimum > 0) { "No PCM output buffer is available" }
                 val bufferBytes = maxOf(minimum, SAMPLE_RATE / 10 * 2)
+                val standardUsage = if (navigation) AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+                    else AudioAttributes.USAGE_MEDIA
+                val usage = factoryAudio?.audioUsage(if (navigation) "GUIDANCE" else "MEDIA", standardUsage)
+                    ?: standardUsage
+                val contentType = if (navigation) AudioAttributes.CONTENT_TYPE_SPEECH else AudioAttributes.CONTENT_TYPE_MUSIC
+                var attributes = AudioAttributes.Builder().setUsage(usage).setContentType(contentType).build()
+                if (attributes.usage != usage) {
+                    attributes = AudioAttributes.Builder().setUsage(standardUsage).setContentType(contentType).build()
+                }
                 val built = if (channel == 0) {
                     AudioTrack.Builder()
-                        .setAudioAttributes(
-                            AudioAttributes.Builder()
-                                .setUsage(if (navigation) AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
-                                    else AudioAttributes.USAGE_MEDIA)
-                                .setContentType(if (navigation) AudioAttributes.CONTENT_TYPE_SPEECH
-                                    else AudioAttributes.CONTENT_TYPE_MUSIC)
-                                .build(),
-                        )
+                        .setAudioAttributes(attributes)
                         .setAudioFormat(
                             AudioFormat.Builder()
                                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -68,8 +80,23 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
                 }
                 track = built
                 check(built.state == AudioTrack.STATE_INITIALIZED) { "Audio output did not initialize" }
+                if (output != null) {
+                    val device = checkNotNull(output.resolve(audioManager)) { "Output device unavailable" }
+                    check(built.setPreferredDevice(device)) { "Output preference rejected" }
+                }
                 if (closed || generation.get() != request) return@submit
                 activeTrack.set(built)
+                if (focusEnabled && audioManager != null) {
+                    val focusAttributes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) built.audioAttributes
+                        else attributes
+                    val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                        .setAudioAttributes(focusAttributes)
+                        .build()
+                    focusRequest = focus
+                    check(audioManager.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                        "Preview audio focus unavailable"
+                    }
+                }
                 built.setVolume(0.6f)
                 built.play()
                 var written = 0
@@ -93,7 +120,8 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
                 }
             } finally {
                 activeTrack.compareAndSet(track, null)
-                track?.let { runCatching { it.stop() }; it.release() }
+                track?.let { runCatching { it.stop() }; runCatching { it.release() } }
+                focusRequest?.let { runCatching { audioManager?.abandonAudioFocusRequest(it) } }
             }
         }
     }

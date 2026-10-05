@@ -1,4 +1,9 @@
-# Unreleased
+# CoderLin99 0.2.12-geely.1 — 2026-10-05
+
+- Sync official 2fc876e and Geely 8f53b27, including wireless startup recovery, existing-Wi-Fi connections, resolution/display controls, software Opus decoding and navigation output-device selection.
+- Retain Bluetooth compatibility mode, opt-in one-shot handoff, Geely media-stream ownership, duplicate-key filtering, selectable offline diagnostic exports and persistent secondary-display probes.
+- Preserve full diagnostics without a developer unlock. This source sync does not publish an APK or claim full-map projection on the 2023 Boyue L. See [integration notes](docs/FORK-SYNC-0.2.12.md).
+- Use versionCode 34 and retain the existing signing inputs for future upgrades.
 
 ## CoderLin99 0.2.11-geely.4 (vehicle verification build)
 
@@ -33,13 +38,37 @@
 - Recognize the hotspot interface used by Android 9 KX11 head units so wireless CarPlay can leave the preparation screen.
 - Leave direct steering-button compatibility off by default on Android 9 KX11 head units to avoid playback-control conflicts; it remains available in settings.
 
+
+# Unreleased
+
+Add changes after 0.2.12 here.
+
+- Add automatic wireless setup that uses an active car hotspot when available and otherwise prepares a compatible connection with the correct network name and password.
+- Use the car's current hotspot password on Android 9 when the system makes it available, so wireless CarPlay does not keep retrying with outdated saved details.
+- Prefer the hotspot's IPv4 connection on older Geely head units and recognize steering-button press and release events on more Geely models.
+- Let steering-button identification learn the wider range of key codes reported by OneOS head units.
+
+# DiPlay 0.2.12 — 2026-10-04
+
+- Add Existing Wi-Fi / Same LAN wireless CarPlay with scoped IPv4/IPv6 discovery and network-change cleanup (#223).
+- Wait for a stable car-hotspot interface and recover bounded wireless attempts when no AirPlay TCP follows StartSession (#229); add observed-state, authorized-ADB hotspot fallback on firmware exposing supported commands (#235).
+- Improve Apple USB attach matching and narrowly scoped optional USB-prompt assistance (#170, #224).
+- Pause Android 10 station scans during eligible hotspot/P2P sessions, preserving Same LAN, with controller leases and durable retryable restoration (#225).
+- Improve split-screen, launcher cards, short-screen preparation and virtual cluster/floating-map geometry (#171, #172, #181).
+- Add independent system-bar controls and correct in-session save/cancel and Local/USB-CH341 authentication selection (#191, #194).
+- Add system, light-sensor, day and night CarPlay appearance modes, richer custom turn cards, and live main-video picture controls (#178, #193, #211).
+- Offer custom integer resolution from 30% to 160%, with shared limits, correct 30%/160% labels and decoder/canvas capability fallback; refresh connection settings on resume (#179, #230, #196).
+- Reconcile opt-in DiLink 4 cluster routing/calibration into one decoder owner, retain verified HUD gates, and journal exact stock-map holds and recovery (#213, #187).
+- Add DiLink 3 guidance text and projection-display support with committed recovery before mutation, partial-setup compensation and retryable stock restoration (#182).
+- Add opt-in wheel map zoom and main-screen joystick while preserving press/release and call behavior; reject stale queued work across phone/screen changes (#214, #231).
+- Switch supported dashboard contents live using actual delivery and safely retained paused choices; preserve selection across stream/phone replacement (#232).
+- Add a five-second dashboard-song-on-change window with timer invalidation, and retain album art while the next transfer is pending (#215, #228).
+- Export reports through Downloads, document picker, app-external or private fallback storage, with explicit View/Share actions (#185, #219).
+
+See [0.2.12 release notes](docs/RELEASE-NOTES-0.2.12.md) for the complete corrections, hardware evidence and issue-reporting steps. This remains a public preview; no fresh end-to-end vehicle test of the complete repaired release is claimed.
+
 # DiPlay 0.2.11 — 2026-10-03
 
-- Fix wireless CarPlay remaining on the starting screen on more legacy Geely head units.
-- Restore calls, Siri and guidance on KX11 head units, and fix silent guidance on some other head units.
-- Keep music smooth while navigation guidance is speaking, and add factory audio routing for Galaxy E5 head units.
-- Enable direct OneOS steering controls by default on G636, FX11 and KX11 head units, and let button identification use OneOS without log access or a local ADB connection.
-- Let users choose any active secondary display for Geely HUD projection, remember the selected screen, and include HUD screen status in user-submitted diagnostic reports. See [fork update notes](docs/UPDATE-NOTES-0.2.11.md).
 - Add preferred Wi-Fi Direct channel selection for the next connection; Auto remains the default, and manual channel rejection/mismatch reports an error (#175).
 - Add a movable custom dashboard turn card with 2% position steps; leave unknown arrows blank and clear expired guidance (#155).
 - Offer two-, three- or four-finger settings swipes, keeping three as the default (#156).
@@ -55,10 +84,6 @@ See [0.2.11 release notes](docs/RELEASE-NOTES-0.2.11.md) for requirements, devic
 
 # DiPlay 0.2.10 — 2026-10-03
 
-- Add a main-settings editor for the CarPlay return-to-home icon and an explicit diagnostic-report upload with a required user problem description.
-- Route Geely factory guidance through navigation channel 14 by default when the user has not chosen another channel.
-- Release the active phone's factory Bluetooth music channel on any head unit when wireless CarPlay requests its handoff, recognize Geely KX11 units for their factory integration, and reinforce immersive full-screen recovery on Android 11 vendor firmware.
-- Merge upstream 0.2.10 / code 29 while retaining Geely factory artwork, audio and Bluetooth handling, HUD display limits and independently learned steering controls. See [fork update notes](docs/UPDATE-NOTES-0.2.10.md).
 - Publish CarPlay song metadata, position and artwork to Android media sessions; bound artwork queues and reject stale work across sessions (#82).
 - Preserve normal USBMUX frames while handling narrowly validated handshake padding (#114); let USB connect without saved wireless-hotspot credentials (#130).
 - Handle unknown reported Wi-Fi Direct security types, retry busy channels and allow bounded 5 GHz fallback (#121).
@@ -73,23 +98,6 @@ See [0.2.11 release notes](docs/RELEASE-NOTES-0.2.11.md) for requirements, devic
 See [0.2.10 release notes](docs/RELEASE-NOTES-0.2.10.md) for contributor credits, requirements and validation limits. Android 9 remains the minimum supported version.
 
 # DiPlay 0.2.9 — 2026-10-02
-
-## Update — 2026-10-03
-
-- Adapt the CarPlay return-to-home icon for Geely head units, using factory artwork when available and a house icon otherwise.
-- Improve Geely music, navigation, Siri and call audio switching, including Bluetooth music handoff for the active phone.
-- Recognize factory voice-button press/release information and limit transparent HUD guidance to an available HUD display, clearing expired instructions.
-
-G636 / FX11 vehicle compatibility still needs verification with an iPhone. Version remains 0.2.9.
-
-- Add steering button identification in Settings, with assignments for play/pause, next track, previous track and Siri.
-- Fill identified buttons automatically and apply the mapping when saved.
-- Save settings by vehicle and head unit model and upload them to the cloud, resuming uploads when internet access returns.
-- Export saved settings or restore the original controls while retaining the saved configuration.
-
-Button identification requires the head unit to allow button access. Compatibility with individual vehicles still needs physical verification. See [update notes](docs/UPDATE-NOTES-0.2.9.md).
-
-## Original 0.2.9 changes
 
 - Follow BYD head-unit day/night changes while CarPlay is visible, including firmware that does not reliably deliver Android configuration callbacks.
 - Restore media and navigation audio stream selection to 0–20 and inherit older saved navigation settings when no new selection exists. Vendor-specific outputs depend on head-unit support.

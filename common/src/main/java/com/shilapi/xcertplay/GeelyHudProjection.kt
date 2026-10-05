@@ -19,7 +19,6 @@ import android.util.Log
 import android.view.Display
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
 import com.shilapi.xcertplay.hud.CarPlayHudGuidance
 import java.lang.ref.WeakReference
@@ -42,6 +41,8 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
     private var windowManager: WindowManager? = null
     private var hudView: GeelyHudGuidanceView? = null
     private var attachedDisplayId = Display.INVALID_DISPLAY
+    private var attachedWidth = 0
+    private var attachedHeight = 0
     private var guidance: CarPlayHudGuidance? = null
     @Volatile private var windowStatus = "not_attached"
     private val expireGuidance = Runnable {
@@ -101,11 +102,12 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
             .asSequence()
             .filter { it.displayId != Display.DEFAULT_DISPLAY && it.state != Display.STATE_OFF }
             .map {
+                val (width, height) = displaySize(context, it)
                 GeelyHudDisplay(
                     id = it.displayId,
                     name = it.name,
-                    width = it.mode.physicalWidth,
-                    height = it.mode.physicalHeight,
+                    width = width,
+                    height = height,
                 )
             }
             .sortedBy(GeelyHudDisplay::id)
@@ -127,6 +129,14 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
         mainHandler.post(::refresh)
     }
 
+    fun setScale(context: Context, percent: Int) {
+        AirPlayPersistence.saveGeelyHudScalePercent(context, percent)
+        mainHandler.post {
+            hudView?.scalePercent = percent
+            refresh()
+        }
+    }
+
     fun diagnosticReport(context: Context): String {
         val selectedId = AirPlayPersistence.loadGeelyHudDisplayId(context)
         val selectedName = AirPlayPersistence.loadGeelyHudDisplayName(context).orEmpty()
@@ -136,6 +146,8 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
             append("overlayPermission=${Settings.canDrawOverlays(context)} ")
             append("selectedId=$selectedId selectedName=${selectedName.ifBlank { "automatic" }} ")
             append("attachedId=$attachedDisplayId guidancePresent=${guidance != null} windowStatus=$windowStatus")
+            append("scale=${AirPlayPersistence.loadGeelyHudScalePercent(context)}% ")
+            append("attachedId=$attachedDisplayId attachedSize=${attachedWidth}x$attachedHeight")
             appendLine()
             append("availableDisplays=")
             if (displays.isEmpty()) append("none") else append(
@@ -184,19 +196,24 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
             detachWindow()
             return
         }
-        if (attachedDisplayId != display.displayId) {
+        val displayContext = activity.createDisplayContext(display)
+        val (displayWidth, displayHeight) = displaySize(activity, display)
+        if (attachedDisplayId != display.displayId ||
+            attachedWidth != displayWidth || attachedHeight != displayHeight
+        ) {
             detachWindow()
-            val displayContext = activity.createDisplayContext(display)
             val manager = displayContext.getSystemService(WindowManager::class.java) ?: return
-            val view = GeelyHudGuidanceView(displayContext)
+            val view = GeelyHudGuidanceView(
+                displayContext,
+                AirPlayPersistence.loadGeelyHudScalePercent(activity),
+            )
             val params = WindowManager.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
+                displayWidth,
+                displayHeight,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                     WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT,
             ).apply {
@@ -209,6 +226,8 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
                 hudView = view
                 attachedDisplayId = display.displayId
                 windowStatus = "window_added"
+                attachedWidth = displayWidth
+                attachedHeight = displayHeight
             } catch (error: RuntimeException) {
                 windowStatus = "failed_${error.javaClass.simpleName}"
                 Log.w(TAG, "Could not open the HUD display", error)
@@ -219,16 +238,30 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
         hudView?.guidance = guidance
     }
 
+    private fun displaySize(context: Context, display: Display): Pair<Int, Int> {
+        val metrics = context.createDisplayContext(display).resources.displayMetrics
+        return (metrics.widthPixels.takeIf { it > 0 } ?: display.mode.physicalWidth) to
+            (metrics.heightPixels.takeIf { it > 0 } ?: display.mode.physicalHeight)
+    }
+
     private fun detachWindow() {
         val current = hudView
         hudView = null
         runCatching { current?.let { windowManager?.removeViewImmediate(it) } }
         windowManager = null
         attachedDisplayId = Display.INVALID_DISPLAY
+        attachedWidth = 0
+        attachedHeight = 0
     }
 }
 
-private class GeelyHudGuidanceView(context: Context) : View(context) {
+private class GeelyHudGuidanceView(context: Context, initialScalePercent: Int) : View(context) {
+    var scalePercent = initialScalePercent
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     var guidance: CarPlayHudGuidance? = null
         set(value) {
             field = value
@@ -248,6 +281,9 @@ private class GeelyHudGuidanceView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val route = guidance ?: return
+        val checkpoint = canvas.save()
+        val contentScale = scalePercent / 100f
+        canvas.scale(contentScale, contentScale, width * 0.5f, height * 0.5f)
         val heightScale = min(height.toFloat(), width * 0.45f)
         val centerY = height * 0.5f
         val iconSize = heightScale * 0.47f
@@ -268,6 +304,7 @@ private class GeelyHudGuidanceView(context: Context) : View(context) {
             val road = TextUtils.ellipsize(route.road, android.text.TextPaint(roadPaint), maxWidth, TextUtils.TruncateAt.END)
             canvas.drawText(road.toString(), textLeft, centerY + accent.textSize * 0.75f, roadPaint)
         }
+        canvas.restoreToCount(checkpoint)
     }
 
     private fun drawArrow(canvas: Canvas, maneuver: Int, x: Float, y: Float, size: Float) {

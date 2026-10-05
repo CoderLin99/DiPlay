@@ -21,7 +21,7 @@ import org.robolectric.shadows.ShadowContentResolver
 import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28], qualifiers = "en")
+@Config(sdk = [28], qualifiers = "en", shadows = [FileProviderPathTestShadow::class])
 class DiagnosticExportUiTest {
     @Test fun missingPickerSavesAReportAndProvidesSelectableTextInsideDiPlay() {
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
@@ -51,8 +51,10 @@ class DiagnosticExportUiTest {
                 shadowOf(Looper.getMainLooper()).idle()
             }
             val saved = requireNotNull(ShadowAlertDialog.getLatestAlertDialog())
+            val reports = java.io.File(context.getExternalFilesDir(null)!!, "diagnostic-reports")
+            val file = reports.listFiles()!!.single()
             assertTrue(descendants(saved.window!!.decorView).filterIsInstance<TextView>()
-                .any { it.text == activity.getString(R.string.diagnostic_report_saved_in_app) })
+                .any { it.text.contains(file.absolutePath) })
             saved.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
             shadowOf(Looper.getMainLooper()).idle()
             val viewer = ShadowAlertDialog.getLatestAlertDialog()

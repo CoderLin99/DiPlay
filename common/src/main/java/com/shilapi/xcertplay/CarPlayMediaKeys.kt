@@ -15,7 +15,9 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
+import androidx.core.graphics.drawable.toBitmap
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
+import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.vehicle.GeelyFactoryCarPlay
@@ -58,6 +60,8 @@ internal object CarPlayMediaKeys {
     private var appContext: Context? = null
     private var geelyInput: GeelySteeringWheelInputChannel? = null
     private var keyLogMonitor: SteeringKeyLogMonitor? = null
+    private var lastGeelyInputDiagnostics = "oneOs INACTIVE"
+    private var lastKeyLogDiagnostics = "logMonitor INACTIVE"
     @Volatile private var monitorGeneration = 0
     private var steeringProfile: SteeringProfile? = null
     private data class Learning(val owner: Any, val onKey: (SteeringObservedKey?) -> Unit)
@@ -74,6 +78,7 @@ internal object CarPlayMediaKeys {
     private var elapsedUpdatedAt = 0L
     private var artwork: Bitmap? = null
     private val artworkCache = LinkedHashMap<Int, Bitmap?>()
+    private var placeholder: Bitmap? = null
 
     @Synchronized
     fun attach(context: Context, next: CarPlayController, manageAudioFocus: Boolean = true,
@@ -156,9 +161,7 @@ internal object CarPlayMediaKeys {
                 if (controller !== expected) return@synchronized
                 val previousArtwork = artwork
                 if (nowPlaying.artworkTransferId != update.artworkTransferId) {
-                    artwork = update.artworkTransferId?.let { id ->
-                        if (artworkCache.containsKey(id)) artworkCache[id] else null
-                    }
+                    artwork = nextArtwork(update.artworkTransferId, artworkCache, artwork)
                 }
                 if (nowPlaying.elapsedMillis != update.elapsedMillis) elapsedUpdatedAt = SystemClock.elapsedRealtime()
                 val metadataChanged = metadataChanged(nowPlaying, update) || artwork !== previousArtwork
@@ -167,7 +170,7 @@ internal object CarPlayMediaKeys {
                 // Republishing the metadata each time sent a copy of the artwork through system_server
                 // to every media listener, and on a DiLink 5.0 Tang that exhausted memory within
                 // minutes. The position goes in the playback state.
-                if (metadataChanged) session?.setMetadata(androidMetadata(update, artwork))
+                if (metadataChanged) session?.setMetadata(androidMetadata(update, shownArtworkLocked()))
                 publishPlaybackStateLocked()
             }
         }
@@ -190,7 +193,7 @@ internal object CarPlayMediaKeys {
         while (artworkCache.size > MAX_CACHED_ARTWORK) artworkCache.remove(artworkCache.keys.first())
         if (nowPlaying.artworkTransferId == id) {
             artwork = decoded
-            session?.setMetadata(androidMetadata(nowPlaying, artwork))
+            session?.setMetadata(androidMetadata(nowPlaying, shownArtworkLocked()))
         }
     }
 
@@ -209,14 +212,14 @@ internal object CarPlayMediaKeys {
             (profileUsesOneOs || steeringProfile == null &&
                 appContext?.let(AirPlayPersistence::loadGeelySteeringEnabled) == true)
         if (!useGeelyInput) {
-            geelyInput?.close()
+            geelyInput?.let { lastGeelyInputDiagnostics = it.diagnostics(); it.close() }
             geelyInput = null
         } else if (geelyInput == null) {
             geelyInput = GeelySteeringWheelInputChannel(appContext!!, ::onGeelySteeringKey).also {
                 it.setEnabled(true)
             }
         }
-        keyLogMonitor?.close(); keyLogMonitor = null
+        keyLogMonitor?.let { lastKeyLogDiagnostics = it.diagnostics(); it.close() }; keyLogMonitor = null
         val generation = ++monitorGeneration
         val inputBindings = steeringProfile?.bindings?.filterNot { it.source == "oneos" } ?: if (!useGeelyInput && appContext?.let(GeelyFactoryCarPlay::load) != null) {
             // HardKeyModel in the factory APK logs this press even without a connected iPhone.
@@ -283,10 +286,12 @@ internal object CarPlayMediaKeys {
 
     fun steeringDiagnostics(): String = synchronized(this) {
         val permitted = appContext?.checkSelfPermission(android.Manifest.permission.READ_LOGS) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        "systemLogAccess=$permitted mediaSession=${session?.isActive == true} connected=$connected " +
-            "forwardMedia=$forwardMedia requireMediaAudio=$requireMediaAudio mediaAudioEstablished=$mediaAudioEstablished manageFocus=$manageAudioFocus focusHeld=$focusHeld mediaAudioActive=$mediaAudioActive\n" + (geelyInput?.diagnostics() ?: "oneOs INACTIVE") + "\n" +
-            (keyLogMonitor?.diagnostics() ?: "logMonitor INACTIVE") + "\n" + observedKeys.joinToString("\n")
+        SteeringLogAccess.diagnostics() + "\n" + "systemLogAccess=$permitted mediaSession=${session?.isActive == true} connected=$connected " +
+            "forwardMedia=$forwardMedia requireMediaAudio=$requireMediaAudio mediaAudioEstablished=$mediaAudioEstablished manageFocus=$manageAudioFocus focusHeld=$focusHeld mediaAudioActive=$mediaAudioActive\n" + (geelyInput?.diagnostics() ?: "last: $lastGeelyInputDiagnostics") + "\n" +
+            (keyLogMonitor?.diagnostics() ?: "last: $lastKeyLogDiagnostics") + "\n" + observedKeys.joinToString("\n")
     }
+
+    fun steeringDirectReady(): Boolean = synchronized(this) { geelyInput?.ready() == true }
 
     private fun onObservedKey(key: SteeringObservedKey) {
         val learner = synchronized(this) {
@@ -390,7 +395,7 @@ internal object CarPlayMediaKeys {
         focusHeld = granted
         session = MediaSession(context, "DiPlay CarPlay").apply {
             setCallback(callback, mainHandler)
-            setMetadata(androidMetadata(nowPlaying, artwork))
+            setMetadata(androidMetadata(nowPlaying, shownArtworkLocked()))
             isActive = true
         }
         Log.i(TAG, "media keys active focusGranted=$granted")
@@ -494,6 +499,24 @@ internal object CarPlayMediaKeys {
                 putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, it)
             }
         }.build()
+
+    // Without art the car draws DiPlay's bright launcher icon instead.
+    private fun shownArtworkLocked(): Bitmap? =
+        artwork ?: placeholder ?: appContext?.let(::placeholderArt)?.also { placeholder = it }
+
+    internal fun placeholderArt(context: Context): Bitmap? = context
+        .getDrawable(R.drawable.art_now_playing_placeholder)
+        ?.toBitmap(MAX_ARTWORK_DIMENSION, MAX_ARTWORK_DIMENSION)
+
+    /**
+     * The art to show once the iPhone names transfer [id]. A pending transfer keeps [current], so the
+     * placeholder does not flash between tracks.
+     */
+    internal fun nextArtwork(id: Int?, cache: Map<Int, Bitmap?>, current: Bitmap?): Bitmap? = when {
+        id == null -> null
+        cache.containsKey(id) -> cache[id]
+        else -> current
+    }
 
     private fun decodeArtwork(bytes: ByteArray): Bitmap? {
         if (bytes.isEmpty()) return null

@@ -30,17 +30,22 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
     private val closed = AtomicBoolean(false)
     private val frameCounter = AtomicLong(0)
     private val firstFrameLogged = AtomicBoolean(false)
-    private var server: ServerSocket? = null
-    private var socket: Socket? = null
+    @Volatile private var server: ServerSocket? = null
+    @Volatile private var socket: Socket? = null
     private var thread: Thread? = null
     @Volatile private var listener: Listener = object : Listener {}
 
     fun listen(listener: Listener): Int {
+        check(!closed.get()) { "Screen stream already closed" }
         this.listener = listener
         val bound = ServerSocket()
         bound.reuseAddress = true
         bound.bind(InetSocketAddress(InetAddress.getByName("::"), 0))
         server = bound
+        if (closed.get()) {
+            safeClose(bound)
+            error("Screen stream closed while binding")
+        }
         thread = Thread({ accept(bound) }, "airplay-screen").apply { isDaemon = true; start() }
         return bound.localPort
     }
@@ -56,6 +61,10 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         try {
             val accepted = bound.accept()
             socket = accepted
+            if (closed.get()) {
+                safeClose(accepted)
+                return
+            }
             run(accepted)
         } catch (error: Exception) {
             if (!closed.get()) listener.onClosed(error)

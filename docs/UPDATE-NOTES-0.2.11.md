@@ -4,6 +4,7 @@
 
 ## 本次更新
 
+- 修复部分车机无线连接后音乐、导航、通话和语音助手仍从手机发声的问题。
 - 修复 KX11 无线连接画面正常但声音仍从手机播放的问题；有线连接继续使用已验证的音频方式。
 - 修复 Android 9 KX11 已开启车机热点仍停在准备中的问题。
 - Android 9 KX11 不再默认接入原车方向盘按键，避免左右切歌和暂停冲突；需要时仍可在设置中开启兼容模式。
@@ -30,6 +31,7 @@
 
 ## What’s new
 
+- Restore wireless music, navigation, calls and voice-assistant audio on head units that previously kept sound on the phone.
 - Restore wireless CarPlay sound on KX11 while keeping the proven wired audio path.
 - Recognize the hotspot interface used by Android 9 KX11 head units so wireless CarPlay can leave the preparation screen.
 - Leave direct steering controls off by default on Android 9 KX11 to avoid playback-control conflicts; the compatibility option remains available in settings.

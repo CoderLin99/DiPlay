@@ -61,6 +61,7 @@ class SteeringControlsActivity : ComponentActivity() {
     private val refresh = object : Runnable {
         override fun run() {
             updateCloudState()
+            updateAccess()
             diagnosticText?.text = CarPlayMediaKeys.steeringDiagnostics()
             handler.postDelayed(this, 1_000L)
         }
@@ -267,7 +268,7 @@ class SteeringControlsActivity : ComponentActivity() {
     private fun updateAccess() {
         if (::accessButton.isInitialized) {
             accessButton.visibility = if (SteeringLogAccess.granted(this) ||
-                GeelySteeringWheelInputChannel.isKnownGeelyHeadUnit()
+                CarPlayMediaKeys.steeringDirectReady()
             ) View.GONE else View.VISIBLE
             accessButton.enable(!requestingAccess)
         }
@@ -290,7 +291,10 @@ class SteeringControlsActivity : ComponentActivity() {
                 requestingAccess = false
                 if (isDestroyed || isFinishing) return@post
                 updateAccess()
-                instruction.setText(when (result) {
+                if (result == SteeringLogAccess.Result.READY && learningOperation != null) {
+                    CarPlayMediaKeys.reloadSteeringProfile(this)
+                }
+                if (learningOperation == null) instruction.setText(when (result) {
                     SteeringLogAccess.Result.READY -> R.string.steering_choose_button
                     SteeringLogAccess.Result.APPROVAL_REQUIRED -> R.string.steering_access_approval
                     SteeringLogAccess.Result.UNAVAILABLE -> R.string.steering_access_unavailable

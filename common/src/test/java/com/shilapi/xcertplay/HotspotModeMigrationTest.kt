@@ -19,15 +19,15 @@ class HotspotModeMigrationTest {
         prefs.edit().putString("wireless_hotspot_mode", "LOCAL_ONLY_HOTSPOT").apply()
         AirPlayPersistence.saveManualHotspotSsid(context, "Test car")
         AirPlayPersistence.saveManualHotspotPassphrase(context, "test-password")
-        assertEquals(WirelessHotspotMode.MANUAL, AirPlayPersistence.loadWirelessHotspotMode(context))
-        assertEquals("MANUAL", prefs.getString("wireless_hotspot_mode", null))
+        assertEquals(WirelessHotspotMode.AUTOMATIC, AirPlayPersistence.loadWirelessHotspotMode(context))
+        assertEquals("AUTOMATIC", prefs.getString("wireless_hotspot_mode", null))
         assertEquals("Test car", AirPlayPersistence.loadManualHotspotSsid(context))
         assertEquals("test-password", AirPlayPersistence.loadManualHotspotPassphrase(context))
     }
 
-    @Test fun freshInstallUsesBuiltInHotspot() {
+    @Test fun freshInstallUsesAutomaticConnection() {
         prefs.edit().clear().apply()
-        assertEquals(WirelessHotspotMode.MANUAL, AirPlayPersistence.loadWirelessHotspotMode(context))
+        assertEquals(WirelessHotspotMode.AUTOMATIC, AirPlayPersistence.loadWirelessHotspotMode(context))
     }
 
     @Test fun existingWifiDirectSelectionIsPreserved() {
@@ -37,6 +37,6 @@ class HotspotModeMigrationTest {
 
     @Test @Config(sdk = [28]) fun olderAndroidDoesNotFallBackToRemovedLocalMode() {
         prefs.edit().putString("wireless_hotspot_mode", "WIFI_P2P").apply()
-        assertEquals(WirelessHotspotMode.MANUAL, AirPlayPersistence.loadWirelessHotspotMode(context))
+        assertEquals(WirelessHotspotMode.AUTOMATIC, AirPlayPersistence.loadWirelessHotspotMode(context))
     }
 }

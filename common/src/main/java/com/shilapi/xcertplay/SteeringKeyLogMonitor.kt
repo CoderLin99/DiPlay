@@ -113,7 +113,9 @@ internal class SteeringKeyLogMonitor(
         val keyField = fields.firstOrNull { extras.containsKey(it) && integer(extras.get(it)) != null } ?: return@runCatching null
         val code = integer(extras.get(keyField)) ?: return@runCatching null
         if (code !in 1..1_000_000) return@runCatching null
-        val eventField = (configured.map { it.eventExtra } + listOf("keyAction", "key_action", "event", "action", "ACTION"))
+        val eventField = (configured.map { it.eventExtra } + listOf(
+            "keyEvent", "key_event", "keyAction", "key_action", "event", "action", "ACTION",
+        ))
             .filter(String::isNotBlank).distinct().firstOrNull { extras.containsKey(it) && eventValue(extras.get(it)) != null }
         if ((integer(extras.get("repeatCount")) ?: 0) > 0) return@runCatching null
         val event = eventField?.let { eventValue(extras.get(it)) } ?: 2
@@ -145,7 +147,7 @@ internal class SteeringKeyLogMonitor(
         private val keyFunction = Regex("(?i)\\bonKey(Down|Up|Pressed|Released)\\s*[(:=]\\s*(?:keyCode\\s*[=:]\\s*)?(0x[0-9a-f]+|\\d+)\\b")
         private val functionEvent = Regex("(?i)\\bonKey(Down|Up|Pressed|Released)\\b")
         private val namedKey = Regex("(?i)\\bkeyCode[\"']?[\\s=:]+[\"']?(KEYCODE_[A-Z_0-9]+)")
-        private val action = Regex("(?i)\\b(?:keyAction|key_action|action|event)[\"']?[\\s=:]+[\"']?(?:ACTION_)?(DOWN|UP|SINGLE|LONG|DOUBLE|[0-4])\\b")
+        private val action = Regex("(?i)\\b(?:keyEvent|key_event|keyAction|key_action|action|event)[\"']?[\\s=:]+[\"']?(?:ACTION_)?(DOWN|UP|SINGLE|LONG|DOUBLE|[0-4])\\b")
         private val repeat = Regex("(?i)\\brepeat(?:Count)?[\"']?[\\s=:]+[\"']?(\\d+)")
 
         fun parseKey(message: String, tag: String, broadcastAction: String = ""): SteeringObservedKey? {
